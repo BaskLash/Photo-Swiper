@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:photo_manager/photo_manager.dart';
 import 'dart:typed_data';
 
 import '../models/swipe_item.dart';
