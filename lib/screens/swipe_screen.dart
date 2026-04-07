@@ -1,0 +1,603 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'dart:typed_data';
+
+import 'package:photo_manager/photo_manager.dart';
+
+import '../models/swipe_item.dart';
+import '../services/media_service.dart';
+import '../widgets/swipe_card.dart';
+import 'review_screen.dart';
+
+enum SwipeMode { month, today, random }
+
+class SwipeScreen extends StatefulWidget {
+  final SwipeMode mode;
+  final int? month;
+  final int? year;
+
+  const SwipeScreen({
+    super.key,
+    required this.mode,
+    this.month,
+    this.year,
+  });
+
+  @override
+  State<SwipeScreen> createState() => _SwipeScreenState();
+}
+
+class _SwipeScreenState extends State<SwipeScreen> {
+  final _service = MediaService.instance;
+
+  List<SwipeItem> _items = [];
+  int _currentIndex = 0;
+  bool _loading = true;
+  String? _error;
+
+  // Thumbnail + file-size caches
+  final Map<String, Uint8List?> _thumbCache = {};
+  final Map<String, Future<Uint8List?>> _thumbFutures = {};
+
+  // Key for the SwipeCard widget — changes per item to reset gesture state
+  int _cardKey = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  // ─── Loading ─────────────────────────────────────────────────────────────────
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      List<AssetEntity> assets;
+      switch (widget.mode) {
+        case SwipeMode.month:
+          assets = await _service.loadMonthMedia(
+              widget.month!, widget.year!);
+        case SwipeMode.today:
+          assets = await _service.loadTodayMedia();
+        case SwipeMode.random:
+          assets = await _service.loadRandomMedia(limit: 50);
+      }
+
+      final items = assets.map((a) => SwipeItem(asset: a)).toList();
+
+      if (!mounted) return;
+      setState(() {
+        _items = items;
+        _loading = false;
+      });
+
+      // Preload thumbnails for first 3 items
+      for (int i = 0; i < items.length && i < 3; i++) {
+        _preloadThumb(i);
+      }
+      // Load file sizes for first 2
+      for (int i = 0; i < items.length && i < 2; i++) {
+        _loadFileSize(i);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Could not load media. Please check permissions.';
+        _loading = false;
+      });
+    }
+  }
+
+  void _preloadThumb(int index) {
+    if (index >= _items.length) return;
+    final id = _items[index].asset.id;
+    if (_thumbCache.containsKey(id)) return;
+    if (_thumbFutures.containsKey(id)) return;
+
+    final future = _items[index].asset.thumbnailDataWithSize(
+      const ThumbnailSize(900, 1200),
+      quality: 92,
+    );
+    _thumbFutures[id] = future;
+    future.then((bytes) {
+      if (mounted) {
+        _thumbCache[id] = bytes;
+        _thumbFutures.remove(id);
+        if (mounted) setState(() {});
+      }
+    });
+  }
+
+  void _loadFileSize(int index) {
+    if (index >= _items.length) return;
+    final item = _items[index];
+    if (item.fileSizeBytes != null) return;
+
+    _service.getFileSize(item.asset).then((size) {
+      if (!mounted || index >= _items.length) return;
+      setState(() => _items[index].fileSizeBytes = size);
+    });
+  }
+
+  // ─── Swipe decision ───────────────────────────────────────────────────────────
+
+  void _decide(SwipeDecision decision) {
+    if (_currentIndex >= _items.length) return;
+    HapticFeedback.selectionClick();
+
+    setState(() {
+      _items[_currentIndex].decision = decision;
+      _currentIndex++;
+      _cardKey++;
+    });
+
+    if (_currentIndex >= _items.length) {
+      _onSessionComplete();
+      return;
+    }
+
+    // Preload ahead
+    _preloadThumb(_currentIndex + 2);
+    _loadFileSize(_currentIndex);
+    _loadFileSize(_currentIndex + 1);
+  }
+
+  void _onSessionComplete() {
+    final toDelete =
+        _items.where((i) => i.decision == SwipeDecision.delete).toList();
+    final laterItems =
+        _items.where((i) => i.decision == SwipeDecision.later).toList();
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ReviewScreen(
+          toDelete: toDelete,
+          laterItems: laterItems,
+        ),
+      ),
+    );
+  }
+
+  // ─── Build ────────────────────────────────────────────────────────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0D0D0D),
+      appBar: _buildAppBar(),
+      body: _buildBody(),
+    );
+  }
+
+  PreferredSizeWidget _buildAppBar() {
+    String title;
+    switch (widget.mode) {
+      case SwipeMode.month:
+        const months = [
+          'January', 'February', 'March', 'April', 'May', 'June',
+          'July', 'August', 'September', 'October', 'November', 'December',
+        ];
+        title =
+            '${months[widget.month! - 1]} ${widget.year}';
+      case SwipeMode.today:
+        title = 'Today';
+      case SwipeMode.random:
+        title = 'Random';
+    }
+
+    return AppBar(
+      backgroundColor: const Color(0xFF0D0D0D),
+      surfaceTintColor: Colors.transparent,
+      leading: IconButton(
+        icon: const Icon(Icons.close_rounded, color: Colors.white),
+        onPressed: () => Navigator.pop(context),
+      ),
+      title: Text(title,
+          style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+              fontSize: 18)),
+      centerTitle: true,
+      actions: [
+        if (!_loading && _items.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: Center(
+              child: Text(
+                '${_currentIndex + 1} / ${_items.length}',
+                style: const TextStyle(
+                  color: Color(0xFF8E8E93),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildBody() {
+    if (_loading) {
+      return const Center(
+        child: CircularProgressIndicator(color: Color(0xFF6B4EFF)),
+      );
+    }
+    if (_error != null) {
+      return _ErrorView(message: _error!, onRetry: _load);
+    }
+    if (_items.isEmpty) {
+      return const _EmptyView();
+    }
+    if (_currentIndex >= _items.length) {
+      return const Center(
+        child: CircularProgressIndicator(color: Color(0xFF6B4EFF)),
+      );
+    }
+
+    return SafeArea(
+      child: Column(
+        children: [
+          // Progress bar
+          _ProgressBar(
+            current: _currentIndex,
+            total: _items.length,
+          ),
+
+          // Card area
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: SwipeCard(
+                key: ValueKey(_cardKey),
+                onSwipeLeft: () => _decide(SwipeDecision.delete),
+                onSwipeRight: () => _decide(SwipeDecision.keep),
+                child: _buildMediaCard(_items[_currentIndex]),
+              ),
+            ),
+          ),
+
+          // Meta info
+          _buildMeta(_items[_currentIndex]),
+
+          // Action buttons
+          _buildActionButtons(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMediaCard(SwipeItem item) {
+    final id = item.asset.id;
+    final cached = _thumbCache[id];
+
+    Widget imageWidget;
+    if (cached != null) {
+      imageWidget = Image.memory(
+        cached,
+        fit: BoxFit.cover,
+        gaplessPlayback: true,
+      );
+    } else {
+      imageWidget = FutureBuilder<Uint8List?>(
+        future: _thumbFutures[id] ??
+            item.asset.thumbnailDataWithSize(
+              const ThumbnailSize(900, 1200),
+              quality: 92,
+            ),
+        builder: (_, snap) {
+          if (snap.hasData && snap.data != null) {
+            // Store in cache for next rebuild
+            _thumbCache[id] = snap.data;
+            return Image.memory(
+              snap.data!,
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+            );
+          }
+          return Container(
+            color: const Color(0xFF1C1C1E),
+            child: const Center(
+              child: CircularProgressIndicator(
+                color: Color(0xFF6B4EFF),
+                strokeWidth: 2,
+              ),
+            ),
+          );
+        },
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          imageWidget,
+          // Video badge
+          if (item.asset.type == AssetType.video)
+            Positioned(
+              top: 12,
+              left: 12,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.65),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.videocam_rounded,
+                        color: Colors.white, size: 14),
+                    const SizedBox(width: 4),
+                    Text(
+                      _formatDuration(item.asset.videoDuration),
+                      style: const TextStyle(
+                          color: Colors.white, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMeta(SwipeItem item) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.calendar_today_rounded,
+                  color: Color(0xFF8E8E93), size: 14),
+              const SizedBox(width: 6),
+              Text(
+                item.formattedDate,
+                style: const TextStyle(
+                    color: Color(0xFF8E8E93), fontSize: 13),
+              ),
+            ],
+          ),
+          if (item.fileSizeBytes != null)
+            Row(
+              children: [
+                const Icon(Icons.storage_rounded,
+                    color: Color(0xFF8E8E93), size: 14),
+                const SizedBox(width: 4),
+                Text(
+                  item.fileSizeDisplay,
+                  style: const TextStyle(
+                      color: Color(0xFF8E8E93), fontSize: 13),
+                ),
+              ],
+            )
+          else
+            const SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(
+                strokeWidth: 1.5,
+                color: Color(0xFF3A3A3C),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionButtons() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          // Delete
+          _ActionButton(
+            icon: Icons.delete_outline_rounded,
+            color: const Color(0xFFFF453A),
+            label: 'Delete',
+            onTap: () => _decide(SwipeDecision.delete),
+          ),
+
+          // Later (centre)
+          _ActionButton(
+            icon: Icons.access_time_rounded,
+            color: const Color(0xFFFFD60A),
+            label: 'Later',
+            size: 52,
+            onTap: () => _decide(SwipeDecision.later),
+          ),
+
+          // Keep
+          _ActionButton(
+            icon: Icons.favorite_rounded,
+            color: const Color(0xFF30D158),
+            label: 'Keep',
+            onTap: () => _decide(SwipeDecision.keep),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDuration(Duration d) {
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+}
+
+// ─── Progress bar ─────────────────────────────────────────────────────────────
+
+class _ProgressBar extends StatelessWidget {
+  final int current;
+  final int total;
+
+  const _ProgressBar({required this.current, required this.total});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Column(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: LinearProgressIndicator(
+              value: total > 0 ? current / total : 0,
+              backgroundColor: const Color(0xFF2C2C2E),
+              valueColor: const AlwaysStoppedAnimation(Color(0xFF6B4EFF)),
+              minHeight: 4,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '${current + 1} of $total',
+            style: const TextStyle(color: Color(0xFF8E8E93), fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Action button ────────────────────────────────────────────────────────────
+
+class _ActionButton extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String label;
+  final double size;
+  final VoidCallback onTap;
+
+  const _ActionButton({
+    required this.icon,
+    required this.color,
+    required this.label,
+    required this.onTap,
+    this.size = 60,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.12),
+              shape: BoxShape.circle,
+              border: Border.all(color: color.withOpacity(0.4), width: 1.5),
+            ),
+            child: Icon(icon, color: color, size: size * 0.43),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            label,
+            style: TextStyle(
+              color: color.withOpacity(0.8),
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Empty / Error views ──────────────────────────────────────────────────────
+
+class _EmptyView extends StatelessWidget {
+  const _EmptyView();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.photo_library_outlined,
+              color: Color(0xFF3A3A3C), size: 72),
+          const SizedBox(height: 20),
+          const Text(
+            'No photos found',
+            style: TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'There are no photos in this period.',
+            style: TextStyle(color: Color(0xFF8E8E93), fontSize: 15),
+          ),
+          const SizedBox(height: 32),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text(
+              'Go back',
+              style: TextStyle(color: Color(0xFF6B4EFF), fontSize: 16),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ErrorView extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+
+  const _ErrorView({required this.message, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline_rounded,
+                color: Color(0xFFFF453A), size: 64),
+            const SizedBox(height: 20),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Color(0xFF8E8E93), fontSize: 15),
+            ),
+            const SizedBox(height: 28),
+            ElevatedButton(
+              onPressed: onRetry,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF6B4EFF),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+              ),
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
