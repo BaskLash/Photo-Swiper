@@ -100,7 +100,7 @@ class _SwipeScreenState extends State<SwipeScreen> {
     if (_thumbFutures.containsKey(id)) return;
 
     final future = _items[index].asset.thumbnailDataWithSize(
-      const ThumbnailSize(900, 1200),
+      ThumbnailSize(900, 1200),
       quality: 92,
     );
     _thumbFutures[id] = future;
@@ -288,7 +288,7 @@ class _SwipeScreenState extends State<SwipeScreen> {
       imageWidget = FutureBuilder<Uint8List?>(
         future: _thumbFutures[id] ??
             item.asset.thumbnailDataWithSize(
-              const ThumbnailSize(900, 1200),
+              ThumbnailSize(900, 1200),
               quality: 92,
             ),
         builder: (_, snap) {
