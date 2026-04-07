@@ -373,7 +373,7 @@ class _ReviewThumbnail extends StatelessWidget {
           // Thumbnail
           FutureBuilder<Uint8List?>(
             future: item.asset.thumbnailDataWithSize(
-              const ThumbnailSize(300, 300),
+              ThumbnailSize(300, 300),
             ),
             builder: (_, snap) {
               if (snap.hasData && snap.data != null) {
