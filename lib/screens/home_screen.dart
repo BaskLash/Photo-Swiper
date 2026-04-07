@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/media_service.dart';
 import 'swipe_screen.dart';
+import 'grid_select_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -81,6 +82,17 @@ class _HomeScreenState extends State<HomeScreen> {
           year: _selectedYear,
           mode: SwipeMode.month,
         ),
+      ),
+    );
+  }
+
+  void _openGridSelect(int month) {
+    HapticFeedback.lightImpact();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            GridSelectScreen(month: month, year: _selectedYear),
       ),
     );
   }
@@ -272,6 +284,7 @@ class _HomeScreenState extends State<HomeScreen> {
               isLoading: isLoading,
               hasMedia: hasMedia,
               onTap: hasMedia ? () => _openMonth(month) : null,
+              onGridTap: hasMedia ? () => _openGridSelect(month) : null,
             );
           },
           childCount: 12,
@@ -448,6 +461,7 @@ class _MonthCard extends StatelessWidget {
   final bool isLoading;
   final bool hasMedia;
   final VoidCallback? onTap;
+  final VoidCallback? onGridTap;
 
   const _MonthCard({
     required this.name,
@@ -455,6 +469,7 @@ class _MonthCard extends StatelessWidget {
     required this.isLoading,
     required this.hasMedia,
     this.onTap,
+    this.onGridTap,
   });
 
   @override
@@ -482,13 +497,38 @@ class _MonthCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // Month icon
-              Icon(
-                Icons.photo_library_rounded,
-                color: active
-                    ? const Color(0xFF6B4EFF)
-                    : const Color(0xFF3A3A3C),
-                size: 24,
+              // Top row: photo icon + grid-select button
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Icon(
+                    Icons.photo_library_rounded,
+                    color: active
+                        ? const Color(0xFF6B4EFF)
+                        : const Color(0xFF3A3A3C),
+                    size: 22,
+                  ),
+                  if (onGridTap != null)
+                    GestureDetector(
+                      // Use a separate tap target so it doesn't
+                      // trigger the card's swipe-mode onTap
+                      onTap: onGridTap,
+                      behavior: HitTestBehavior.opaque,
+                      child: Padding(
+                        padding: const EdgeInsets.all(2),
+                        child: Tooltip(
+                          message: 'Select items',
+                          child: Icon(
+                            Icons.checklist_rounded,
+                            color: active
+                                ? const Color(0xFF8E8E93)
+                                : const Color(0xFF3A3A3C),
+                            size: 18,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
 
               // Month name + count

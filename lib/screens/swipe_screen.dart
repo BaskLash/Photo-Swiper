@@ -147,6 +147,25 @@ class _SwipeScreenState extends State<SwipeScreen> {
     _loadFileSize(_currentIndex + 1);
   }
 
+  /// Called when the user taps "Review marked" mid-session.
+  /// Navigates immediately without requiring all cards to be swiped.
+  void _reviewNow() {
+    final toDelete =
+        _items.where((i) => i.decision == SwipeDecision.delete).toList();
+    final laterItems =
+        _items.where((i) => i.decision == SwipeDecision.later).toList();
+    HapticFeedback.mediumImpact();
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ReviewScreen(
+          toDelete: toDelete,
+          laterItems: laterItems,
+        ),
+      ),
+    );
+  }
+
   void _onSessionComplete() {
     final toDelete =
         _items.where((i) => i.decision == SwipeDecision.delete).toList();
@@ -265,6 +284,9 @@ class _SwipeScreenState extends State<SwipeScreen> {
 
           // Meta info
           _buildMeta(_items[_currentIndex]),
+
+          // "Review marked" shortcut — appears as soon as ≥1 item is marked
+          _buildReviewBar(),
 
           // Action buttons
           _buildActionButtons(),
@@ -394,6 +416,72 @@ class _SwipeScreenState extends State<SwipeScreen> {
             ),
         ],
       ),
+    );
+  }
+
+  Widget _buildReviewBar() {
+    final count =
+        _items.where((i) => i.decision == SwipeDecision.delete).length;
+
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeInOut,
+      child: count == 0
+          ? const SizedBox.shrink()
+          : Padding(
+              padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+              child: GestureDetector(
+                onTap: _reviewNow,
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                      vertical: 11, horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF453A).withOpacity(0.10),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: const Color(0xFFFF453A).withOpacity(0.35),
+                      width: 1,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.delete_outline_rounded,
+                              color: Color(0xFFFF453A), size: 16),
+                          const SizedBox(width: 7),
+                          Text(
+                            '$count ${count == 1 ? 'item' : 'items'} marked',
+                            style: const TextStyle(
+                              color: Color(0xFFFF453A),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const Row(
+                        children: [
+                          Text(
+                            'Review now',
+                            style: TextStyle(
+                              color: Color(0xFFFF453A),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          SizedBox(width: 3),
+                          Icon(Icons.arrow_forward_rounded,
+                              color: Color(0xFFFF453A), size: 13),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
     );
   }
 
