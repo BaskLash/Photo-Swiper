@@ -94,7 +94,7 @@ class _PermissionScreenState extends State<PermissionScreen> {
               const SizedBox(height: 40),
 
               const Text(
-                'Access Your\nPhoto Library',
+                'Photo Library',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.white,
@@ -107,7 +107,7 @@ class _PermissionScreenState extends State<PermissionScreen> {
               const SizedBox(height: 16),
 
               const Text(
-                'Photo Swiper needs access to your gallery\nto help you review and clean up your photos.\n\nYour media never leaves your device.',
+                'Photo Swiper uses your photo library\nto help you review and clean up your photos.\n\nYour media never leaves your device.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Color(0xFF8E8E93),
@@ -143,7 +143,7 @@ class _PermissionScreenState extends State<PermissionScreen> {
                           ),
                         )
                       : const Text(
-                          'Allow Access',
+                          'Continue',
                           style: TextStyle(
                             fontSize: 17,
                             fontWeight: FontWeight.w600,
