@@ -42,10 +42,28 @@ class _SwipeScreenState extends State<SwipeScreen> {
   // Key for the SwipeCard widget — changes per item to reset gesture state
   int _cardKey = 0;
 
+  // ─── Thumbnail strip ──────────────────────────────────────────────────────────
+  // Separate ScrollController and a compact-size thumb cache (160×160) for the
+  // strip. If the high-res card thumb is already in _thumbCache we reuse it, so
+  // visible items never load twice.
+  final ScrollController _stripController = ScrollController();
+  final Map<String, Future<Uint8List?>> _stripFutures = {};
+
+  // Layout constants shared between builder and scroll helper
+  static const double _stripItemWidth = 54;
+  static const double _stripGap = 6;
+  static const double _stripPad = 16;
+
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _stripController.dispose();
+    super.dispose();
   }
 
   // ─── Loading ─────────────────────────────────────────────────────────────────
@@ -141,10 +159,44 @@ class _SwipeScreenState extends State<SwipeScreen> {
       return;
     }
 
+    // Keep the strip centred on the new card
+    _scrollStripToIndex(_currentIndex);
+
     // Preload ahead
     _preloadThumb(_currentIndex + 2);
     _loadFileSize(_currentIndex);
     _loadFileSize(_currentIndex + 1);
+  }
+
+  /// Jump directly to [index] without swiping through intermediate cards.
+  /// Works for both forward and backward navigation from the thumbnail strip.
+  void _jumpToIndex(int index) {
+    if (index == _currentIndex || index >= _items.length) return;
+    HapticFeedback.selectionClick();
+    setState(() {
+      _currentIndex = index;
+      _cardKey++;
+    });
+    _scrollStripToIndex(index);
+    _preloadThumb(index + 1);
+    _loadFileSize(index);
+    _loadFileSize(index + 1);
+  }
+
+  /// Smoothly scrolls the thumbnail strip so that [index] is centred in the
+  /// viewport. Safe to call before the ListView has attached its first frame.
+  void _scrollStripToIndex(int index) {
+    if (!_stripController.hasClients) return;
+    final double viewW = MediaQuery.of(context).size.width;
+    const double itemStep = _stripItemWidth + _stripGap;
+    // Centre of the target item in scroll-content coordinates
+    final double itemCentre = _stripPad + index * itemStep + _stripItemWidth / 2;
+    final double target = (itemCentre - viewW / 2).clamp(0.0, double.infinity);
+    _stripController.animateTo(
+      target,
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOut,
+    );
   }
 
   /// Called when the user taps "Review marked" mid-session.
@@ -285,6 +337,9 @@ class _SwipeScreenState extends State<SwipeScreen> {
           // Meta info
           _buildMeta(_items[_currentIndex]),
 
+          // Horizontal thumbnail strip — tap any cell to jump to that item
+          _buildThumbnailStrip(),
+
           // "Review marked" shortcut — appears as soon as ≥1 item is marked
           _buildReviewBar(),
 
@@ -416,6 +471,112 @@ class _SwipeScreenState extends State<SwipeScreen> {
             ),
         ],
       ),
+    );
+  }
+
+  // ─── Thumbnail strip ──────────────────────────────────────────────────────────
+
+  Widget _buildThumbnailStrip() {
+    // Not worth showing a strip for a single item
+    if (_items.length <= 1) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: SizedBox(
+        height: 64,
+        child: ListView.builder(
+          controller: _stripController,
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: _stripPad),
+          // addRepaintBoundaries keeps scroll smooth on large lists
+          addRepaintBoundaries: true,
+          itemCount: _items.length,
+          itemBuilder: (_, index) {
+            final isActive = index == _currentIndex;
+            final decision = _items[index].decision;
+
+            // Colour-coded decision indicator shown as a bottom bar
+            final Color? barColor = switch (decision) {
+              SwipeDecision.delete => const Color(0xFFFF453A),
+              SwipeDecision.keep   => const Color(0xFF30D158),
+              SwipeDecision.later  => const Color(0xFFFFD60A),
+              SwipeDecision.pending => null,
+            };
+
+            return GestureDetector(
+              onTap: () => _jumpToIndex(index),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                width: _stripItemWidth,
+                margin: const EdgeInsets.only(right: _stripGap),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isActive
+                        ? const Color(0xFF6B4EFF)
+                        : Colors.transparent,
+                    width: 2.5,
+                  ),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      // Thumbnail — reuses card cache when available
+                      FutureBuilder<Uint8List?>(
+                        future: _getStripThumb(index),
+                        builder: (_, snap) {
+                          if (snap.hasData && snap.data != null) {
+                            return Image.memory(
+                              snap.data!,
+                              fit: BoxFit.cover,
+                              gaplessPlayback: true,
+                            );
+                          }
+                          return Container(color: const Color(0xFF2C2C2E));
+                        },
+                      ),
+
+                      // Dim non-active items slightly so the active one pops
+                      if (!isActive)
+                        Container(
+                          color: Colors.black.withOpacity(0.28),
+                        ),
+
+                      // Decision colour bar at the bottom edge
+                      if (barColor != null)
+                        Positioned(
+                          bottom: 0,
+                          left: 0,
+                          right: 0,
+                          child: Container(height: 3, color: barColor),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  /// Returns a thumb for the strip.
+  /// Reuses the already-loaded high-res card thumb when present;
+  /// otherwise fetches a compact 160×160 thumbnail to keep memory low.
+  Future<Uint8List?> _getStripThumb(int index) {
+    final id = _items[index].asset.id;
+    // High-res already in cache → free reuse, no extra fetch
+    if (_thumbCache.containsKey(id) && _thumbCache[id] != null) {
+      return Future.value(_thumbCache[id]);
+    }
+    return _stripFutures.putIfAbsent(
+      id,
+      () => _items[index].asset.thumbnailDataWithSize(
+            ThumbnailSize(160, 160),
+          ),
     );
   }
 
