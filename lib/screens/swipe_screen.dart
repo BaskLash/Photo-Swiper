@@ -6,6 +6,7 @@ import 'package:photo_manager/photo_manager.dart';
 
 import '../models/swipe_item.dart';
 import '../services/media_service.dart';
+import '../services/preferences_service.dart';
 import '../widgets/swipe_card.dart';
 import 'review_screen.dart';
 
@@ -42,9 +43,21 @@ class _SwipeScreenState extends State<SwipeScreen> {
   // Key for the SwipeCard widget — changes per item to reset gesture state
   int _cardKey = 0;
 
+  // Read once at screen creation so the session stays consistent
+  late final bool _leftHanded;
+
+  // ─── Thumbnail strip ──────────────────────────────────────────────────────────
+  final ScrollController _stripController = ScrollController();
+  final Map<String, Future<Uint8List?>> _stripFutures = {};
+
+  static const double _stripItemWidth = 54;
+  static const double _stripGap = 6;
+  static const double _stripPad = 16;
+
   @override
   void initState() {
     super.initState();
+    _leftHanded = PreferencesService.instance.isLeftHanded;
     _load();
   }
 
@@ -256,8 +269,11 @@ class _SwipeScreenState extends State<SwipeScreen> {
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
               child: SwipeCard(
                 key: ValueKey(_cardKey),
-                onSwipeLeft: () => _decide(SwipeDecision.delete),
-                onSwipeRight: () => _decide(SwipeDecision.keep),
+                leftHandedMode: _leftHanded,
+                onSwipeLeft: () => _decide(
+                    _leftHanded ? SwipeDecision.keep : SwipeDecision.delete),
+                onSwipeRight: () => _decide(
+                    _leftHanded ? SwipeDecision.delete : SwipeDecision.keep),
                 child: _buildMediaCard(_items[_currentIndex]),
               ),
             ),
@@ -398,20 +414,44 @@ class _SwipeScreenState extends State<SwipeScreen> {
   }
 
   Widget _buildActionButtons() {
+    // Buttons mirror the swipe directions so the visual layout is consistent.
+    // Default:      [Delete]  [Later]  [Keep]
+    // Left-handed:  [Keep]    [Later]  [Delete]
+    final leftButton = _leftHanded
+        ? _ActionButton(
+            icon: Icons.favorite_rounded,
+            color: const Color(0xFF30D158),
+            label: 'Keep',
+            onTap: () => _decide(SwipeDecision.keep),
+          )
+        : _ActionButton(
+            icon: Icons.delete_outline_rounded,
+            color: const Color(0xFFFF453A),
+            label: 'Delete',
+            onTap: () => _decide(SwipeDecision.delete),
+          );
+
+    final rightButton = _leftHanded
+        ? _ActionButton(
+            icon: Icons.delete_outline_rounded,
+            color: const Color(0xFFFF453A),
+            label: 'Delete',
+            onTap: () => _decide(SwipeDecision.delete),
+          )
+        : _ActionButton(
+            icon: Icons.favorite_rounded,
+            color: const Color(0xFF30D158),
+            label: 'Keep',
+            onTap: () => _decide(SwipeDecision.keep),
+          );
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          // Delete
-          _ActionButton(
-            icon: Icons.delete_outline_rounded,
-            color: const Color(0xFFFF453A),
-            label: 'Delete',
-            onTap: () => _decide(SwipeDecision.delete),
-          ),
-
-          // Later (centre)
+          leftButton,
+          // Later always stays in the centre
           _ActionButton(
             icon: Icons.access_time_rounded,
             color: const Color(0xFFFFD60A),
@@ -419,14 +459,7 @@ class _SwipeScreenState extends State<SwipeScreen> {
             size: 52,
             onTap: () => _decide(SwipeDecision.later),
           ),
-
-          // Keep
-          _ActionButton(
-            icon: Icons.favorite_rounded,
-            color: const Color(0xFF30D158),
-            label: 'Keep',
-            onTap: () => _decide(SwipeDecision.keep),
-          ),
+          rightButton,
         ],
       ),
     );

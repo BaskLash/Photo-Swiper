@@ -4,9 +4,12 @@ import 'package:flutter/services.dart';
 import 'screens/intro_screen.dart';
 import 'screens/permission_screen.dart';
 import 'screens/home_screen.dart';
+import 'services/preferences_service.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Load persisted preferences before the first frame
+  await PreferencesService.instance.init();
   // Lock to portrait
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
