@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../services/media_service.dart';
 import 'swipe_screen.dart';
 import 'grid_select_screen.dart';
+import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -163,6 +164,14 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
       actions: [
+        IconButton(
+          icon: const Icon(Icons.settings_rounded,
+              color: Color(0xFF8E8E93)),
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const SettingsScreen()),
+          ),
+        ),
         IconButton(
           icon: const Icon(Icons.info_outline_rounded,
               color: Color(0xFF8E8E93)),

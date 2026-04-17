@@ -7,14 +7,18 @@ import 'package:flutter/material.dart';
 /// creates a fresh widget (and fresh gesture state) for every new card.
 class SwipeCard extends StatefulWidget {
   final Widget child;
-  final VoidCallback onSwipeLeft;   // delete
-  final VoidCallback onSwipeRight;  // keep
+  final VoidCallback onSwipeLeft;
+  final VoidCallback onSwipeRight;
+  /// When true the stamp labels are flipped so the visual feedback always
+  /// matches the actual action: right = DELETE (red), left = KEEP (green).
+  final bool leftHandedMode;
 
   const SwipeCard({
     super.key,
     required this.child,
     required this.onSwipeLeft,
     required this.onSwipeRight,
+    this.leftHandedMode = false,
   });
 
   @override
@@ -129,8 +133,20 @@ class _SwipeCardState extends State<SwipeCard>
   Widget build(BuildContext context) {
     final screenW = MediaQuery.of(context).size.width;
     final rotate = (_offset / screenW * 0.28).clamp(-0.5, 0.5);
-    final deleteOp = (-_offset / 180).clamp(0.0, 1.0);
-    final keepOp = (_offset / 180).clamp(0.0, 1.0);
+    // Opacity driven by drag direction, independent of handedness
+    final rightOp = (_offset / 180).clamp(0.0, 1.0);   // dragging right
+    final leftOp  = (-_offset / 180).clamp(0.0, 1.0);  // dragging left
+
+    // In left-handed mode the right swipe is DELETE and the left swipe is KEEP
+    final rightLabel = widget.leftHandedMode ? 'DELETE' : 'KEEP';
+    final rightColor = widget.leftHandedMode
+        ? const Color(0xFFFF453A)
+        : const Color(0xFF30D158);
+
+    final leftLabel = widget.leftHandedMode ? 'KEEP' : 'DELETE';
+    final leftColor = widget.leftHandedMode
+        ? const Color(0xFF30D158)
+        : const Color(0xFFFF453A);
 
     return GestureDetector(
       onHorizontalDragUpdate: _onUpdate,
@@ -145,21 +161,22 @@ class _SwipeCardState extends State<SwipeCard>
             fit: StackFit.expand,
             children: [
               widget.child,
-              if (deleteOp > 0.04)
+              // Stamp appears on the side the user is dragging FROM (Tinder convention)
+              if (rightOp > 0.04)
                 _StampOverlay(
-                  label: 'DELETE',
-                  color: const Color(0xFFFF453A),
-                  opacity: deleteOp,
-                  alignment: Alignment.topRight,
-                  angle: 0.25,
-                ),
-              if (keepOp > 0.04)
-                _StampOverlay(
-                  label: 'KEEP',
-                  color: const Color(0xFF30D158),
-                  opacity: keepOp,
+                  label: rightLabel,
+                  color: rightColor,
+                  opacity: rightOp,
                   alignment: Alignment.topLeft,
                   angle: -0.25,
+                ),
+              if (leftOp > 0.04)
+                _StampOverlay(
+                  label: leftLabel,
+                  color: leftColor,
+                  opacity: leftOp,
+                  alignment: Alignment.topRight,
+                  angle: 0.25,
                 ),
             ],
           ),
