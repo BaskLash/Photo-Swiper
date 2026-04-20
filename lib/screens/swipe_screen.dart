@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:typed_data';
+import 'dart:ui' show ImageFilter;
 
 import 'package:photo_manager/photo_manager.dart';
 
@@ -362,13 +363,24 @@ class _SwipeScreenState extends State<SwipeScreen> {
     final id = item.asset.id;
     final cached = _thumbCache[id];
 
+    // Blurred background + contain foreground: image is never cropped, and
+    // the soft blurred fill hides letterbox/pillarbox bars (same as Google
+    // Photos / Apple Photos). The scrim keeps the foreground image legible.
+    Widget imageLayer(Uint8List bytes) => Stack(
+      fit: StackFit.expand,
+      children: [
+        ImageFiltered(
+          imageFilter: ImageFilter.blur(sigmaX: 26, sigmaY: 26),
+          child: Image.memory(bytes, fit: BoxFit.cover, gaplessPlayback: true),
+        ),
+        Container(color: Colors.black.withOpacity(0.40)),
+        Image.memory(bytes, fit: BoxFit.contain, gaplessPlayback: true),
+      ],
+    );
+
     Widget imageWidget;
     if (cached != null) {
-      imageWidget = Image.memory(
-        cached,
-        fit: BoxFit.cover,
-        gaplessPlayback: true,
-      );
+      imageWidget = imageLayer(cached);
     } else {
       imageWidget = FutureBuilder<Uint8List?>(
         future: _thumbFutures[id] ??
@@ -378,13 +390,8 @@ class _SwipeScreenState extends State<SwipeScreen> {
             ),
         builder: (_, snap) {
           if (snap.hasData && snap.data != null) {
-            // Store in cache for next rebuild
             _thumbCache[id] = snap.data;
-            return Image.memory(
-              snap.data!,
-              fit: BoxFit.cover,
-              gaplessPlayback: true,
-            );
+            return imageLayer(snap.data!);
           }
           return Container(
             color: const Color(0xFF1C1C1E),
