@@ -12,6 +12,9 @@ class SwipeCard extends StatefulWidget {
   /// When true the stamp labels are flipped so the visual feedback always
   /// matches the actual action: right = DELETE (red), left = KEEP (green).
   final bool leftHandedMode;
+  /// When true the card ignores all horizontal drag gestures so the
+  /// InteractiveViewer inside the child can pan a zoomed image freely.
+  final bool isZoomed;
 
   const SwipeCard({
     super.key,
@@ -19,6 +22,7 @@ class SwipeCard extends StatefulWidget {
     required this.onSwipeLeft,
     required this.onSwipeRight,
     this.leftHandedMode = false,
+    this.isZoomed = false,
   });
 
   @override
@@ -120,11 +124,11 @@ class _SwipeCardState extends State<SwipeCard>
   // ─── Programmatic swipe (called by action buttons) ───────────────────────────
 
   void swipeLeft() {
-    if (!_locked) _flyOff(false);
+    if (!_locked && !widget.isZoomed) _flyOff(false);
   }
 
   void swipeRight() {
-    if (!_locked) _flyOff(true);
+    if (!_locked && !widget.isZoomed) _flyOff(true);
   }
 
   // ─── Build ───────────────────────────────────────────────────────────────────
@@ -148,9 +152,11 @@ class _SwipeCardState extends State<SwipeCard>
         ? const Color(0xFF30D158)
         : const Color(0xFFFF453A);
 
+    // Setting callbacks to null when zoomed removes those recognizers from the
+    // gesture arena, letting InteractiveViewer's pan recognizer win instead.
     return GestureDetector(
-      onHorizontalDragUpdate: _onUpdate,
-      onHorizontalDragEnd: _onEnd,
+      onHorizontalDragUpdate: widget.isZoomed ? null : _onUpdate,
+      onHorizontalDragEnd: widget.isZoomed ? null : _onEnd,
       child: RepaintBoundary(
         child: Transform(
           transform: Matrix4.identity()

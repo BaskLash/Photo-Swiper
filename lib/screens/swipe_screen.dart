@@ -47,6 +47,13 @@ class _SwipeScreenState extends State<SwipeScreen> {
   // Read once at screen creation so the session stays consistent
   late final bool _leftHanded;
 
+  // ─── Zoom state ───────────────────────────────────────────────────────────────
+  // Shared between InteractiveViewer (inside the card) and SwipeCard (gesture
+  // coordination). When _isZoomed is true SwipeCard disables its horizontal-drag
+  // recognizers so InteractiveViewer's pan can win the gesture arena.
+  final TransformationController _zoomController = TransformationController();
+  bool _isZoomed = false;
+
   // ─── Thumbnail strip ──────────────────────────────────────────────────────────
   // Separate ScrollController and a compact-size thumb cache (160×160) for the
   // strip. If the high-res card thumb is already in _thumbCache we reuse it, so
@@ -63,13 +70,29 @@ class _SwipeScreenState extends State<SwipeScreen> {
   void initState() {
     super.initState();
     _leftHanded = PreferencesService.instance.isLeftHanded;
+    _zoomController.addListener(_onZoomChanged);
     _load();
   }
 
   @override
   void dispose() {
+    _zoomController.removeListener(_onZoomChanged);
+    _zoomController.dispose();
     _stripController.dispose();
     super.dispose();
+  }
+
+  void _onZoomChanged() {
+    final scale = _zoomController.value.getMaxScaleOnAxis();
+    final zoomed = scale > 1.005;
+    if (zoomed != _isZoomed && mounted) {
+      setState(() => _isZoomed = zoomed);
+    }
+  }
+
+  void _resetZoom() {
+    _zoomController.value = Matrix4.identity();
+    _isZoomed = false;
   }
 
   // ─── Loading ─────────────────────────────────────────────────────────────────
@@ -153,6 +176,7 @@ class _SwipeScreenState extends State<SwipeScreen> {
   void _decide(SwipeDecision decision) {
     if (_currentIndex >= _items.length) return;
     HapticFeedback.selectionClick();
+    _resetZoom();
 
     setState(() {
       _items[_currentIndex].decision = decision;
@@ -179,6 +203,7 @@ class _SwipeScreenState extends State<SwipeScreen> {
   void _jumpToIndex(int index) {
     if (index == _currentIndex || index >= _items.length) return;
     HapticFeedback.selectionClick();
+    _resetZoom();
     setState(() {
       _currentIndex = index;
       _cardKey++;
@@ -334,6 +359,7 @@ class _SwipeScreenState extends State<SwipeScreen> {
               child: SwipeCard(
                 key: ValueKey(_cardKey),
                 leftHandedMode: _leftHanded,
+                isZoomed: _isZoomed,
                 onSwipeLeft: () => _decide(
                     _leftHanded ? SwipeDecision.keep : SwipeDecision.delete),
                 onSwipeRight: () => _decide(
@@ -411,8 +437,20 @@ class _SwipeScreenState extends State<SwipeScreen> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          imageWidget,
-          // Video badge
+          // InteractiveViewer lives inside the ClipRRect so overflow is clipped
+          // at the card boundary with rounded corners.
+          // panEnabled mirrors _isZoomed:
+          //   • false at scale 1 → single-finger drag reaches SwipeCard's recognizer
+          //   • true when zoomed  → SwipeCard nulls its callbacks, IV wins the arena
+          InteractiveViewer(
+            transformationController: _zoomController,
+            minScale: 1.0,
+            maxScale: 5.0,
+            panEnabled: _isZoomed,
+            clipBehavior: Clip.none,
+            child: imageWidget,
+          ),
+          // Video duration badge — fixed position, not affected by zoom
           if (item.asset.type == AssetType.video)
             Positioned(
               top: 12,
