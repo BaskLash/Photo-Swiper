@@ -8,10 +8,11 @@ import 'package:in_app_review/in_app_review.dart';
 import '../services/preferences_service.dart';
 
 // Replace with real values before shipping
-const _kAppStoreId = '0000000000';
-const _kSupportEmail = 'support@photoswiper.app';
+// Aktualisierte Werte für FlickClean
+const _kAppStoreId = '6761820156';
+const _kSupportEmail = 'support@flickclean.app'; // Prüfe, ob diese Adresse korrekt ist
 const _kShareText =
-    'Check out Photo Swiper – the fastest way to clean up your photo library! 📷\n'
+    'Check out FlickClean – the fastest way to clean up your photo library! 📷\n'
     'https://apps.apple.com/app/id$_kAppStoreId';
 
 class SettingsScreen extends StatefulWidget {
