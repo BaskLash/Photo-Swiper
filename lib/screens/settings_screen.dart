@@ -1,6 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:photo_manager/photo_manager.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:in_app_review/in_app_review.dart';
 import '../services/preferences_service.dart';
+
+// Replace with real values before shipping
+const _kAppStoreId = '0000000000';
+const _kSupportEmail = 'support@photoswiper.app';
+const _kShareText =
+    'Check out Photo Swiper – the fastest way to clean up your photo library! 📷\n'
+    'https://apps.apple.com/app/id$_kAppStoreId';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -9,20 +21,120 @@ class SettingsScreen extends StatefulWidget {
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
+class _SettingsScreenState extends State<SettingsScreen>
+    with WidgetsBindingObserver {
   late bool _leftHanded;
+  PermissionState? _permissionStatus;
+  String _version = '';
 
   @override
   void initState() {
     super.initState();
     _leftHanded = PreferencesService.instance.isLeftHanded;
+    WidgetsBinding.instance.addObserver(this);
+    _loadPermissionStatus();
+    _loadVersion();
   }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  // Refresh permission badge whenever the user returns from System Settings
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _loadPermissionStatus();
+    }
+  }
+
+  Future<void> _loadPermissionStatus() async {
+    final status = await PhotoManager.requestPermissionExtend();
+    if (mounted) setState(() => _permissionStatus = status);
+  }
+
+  Future<void> _loadVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (mounted) setState(() => _version = info.version);
+    } catch (_) {}
+  }
+
+  // ─── Actions ─────────────────────────────────────────────────────────────────
 
   Future<void> _setLeftHanded(bool value) async {
     HapticFeedback.selectionClick();
     setState(() => _leftHanded = value);
     await PreferencesService.instance.setLeftHanded(value);
   }
+
+  Future<void> _rateApp() async {
+    HapticFeedback.lightImpact();
+    try {
+      final review = InAppReview.instance;
+      if (await review.isAvailable()) {
+        await review.requestReview();
+      } else {
+        await review.openStoreListing(appStoreId: _kAppStoreId);
+      }
+    } catch (_) {
+      // Silently ignore: review dialog not available in dev / TestFlight builds
+    }
+  }
+
+  Future<void> _shareApp() async {
+    HapticFeedback.lightImpact();
+    await Share.share(_kShareText, subject: 'Photo Swiper');
+  }
+
+  Future<void> _contactSupport() async {
+    HapticFeedback.lightImpact();
+    final uri = Uri(
+      scheme: 'mailto',
+      path: _kSupportEmail,
+      queryParameters: {
+        'subject': 'Photo Swiper Support',
+        'body':
+            'Hi,\n\nI need help with...\n\n'
+            '---\nApp version: ${_version.isNotEmpty ? _version : 'unknown'}',
+      },
+    );
+    if (!await launchUrl(uri)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No email client found'),
+            backgroundColor: Color(0xFF2C2C2E),
+          ),
+        );
+      }
+    }
+  }
+
+  void _openPermissionSettings() {
+    HapticFeedback.lightImpact();
+    PhotoManager.openSetting();
+  }
+
+  // ─── Permission badge helpers ─────────────────────────────────────────────────
+
+  String get _permissionLabel {
+    if (_permissionStatus == null) return 'Checking…';
+    if (_permissionStatus!.isAuth) return 'Full Access';
+    if (_permissionStatus == PermissionState.limited) return 'Limited';
+    return 'No Access';
+  }
+
+  Color get _permissionColor {
+    if (_permissionStatus == null) return const Color(0xFF8E8E93);
+    if (_permissionStatus!.isAuth) return const Color(0xFF30D158);
+    if (_permissionStatus == PermissionState.limited) return const Color(0xFFFFD60A);
+    return const Color(0xFFFF453A);
+  }
+
+  // ─── Build ───────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -45,41 +157,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 48),
         children: [
-          const Padding(
-            padding: EdgeInsets.only(left: 4, bottom: 10),
-            child: Text(
-              'SWIPE GESTURES',
-              style: TextStyle(
-                color: Color(0xFF8E8E93),
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.8,
-              ),
-            ),
-          ),
-
+          // ── SWIPE GESTURES ─────────────────────────────────────────────────
+          const _SectionLabel('SWIPE GESTURES'),
           Container(
-            decoration: BoxDecoration(
-              color: const Color(0xFF1C1C1E),
-              borderRadius: BorderRadius.circular(16),
-            ),
+            decoration: _kCard,
             child: SwitchListTile(
-              contentPadding:
-                  const EdgeInsets.fromLTRB(16, 6, 12, 6),
-              secondary: Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF6B4EFF).withOpacity(0.14),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(
-                  Icons.back_hand_rounded,
-                  color: Color(0xFF6B4EFF),
-                  size: 20,
-                ),
+              contentPadding: const EdgeInsets.fromLTRB(16, 6, 12, 6),
+              secondary: _IconChip(
+                icon: Icons.back_hand_rounded,
+                color: const Color(0xFF6B4EFF),
               ),
               title: const Text(
                 'Left-handed mode',
@@ -91,70 +179,109 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               subtitle: const Text(
                 'Swipe right to delete, left to keep',
-                style: TextStyle(
-                  color: Color(0xFF8E8E93),
-                  fontSize: 13,
-                ),
+                style: TextStyle(color: Color(0xFF8E8E93), fontSize: 13),
               ),
               value: _leftHanded,
               onChanged: _setLeftHanded,
               activeColor: const Color(0xFF6B4EFF),
             ),
           ),
-
-          const SizedBox(height: 28),
-
-          const Padding(
-            padding: EdgeInsets.only(left: 4, bottom: 10),
-            child: Text(
-              'PREVIEW',
-              style: TextStyle(
-                color: Color(0xFF8E8E93),
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.8,
-              ),
-            ),
-          ),
-
+          const SizedBox(height: 14),
+          const _SectionLabel('PREVIEW'),
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 300),
-            transitionBuilder: (child, anim) =>
-                FadeTransition(opacity: anim, child: child),
+            transitionBuilder: (c, a) => FadeTransition(opacity: a, child: c),
             child: _SwipePreview(
               key: ValueKey(_leftHanded),
               leftHanded: _leftHanded,
             ),
           ),
+          const SizedBox(height: 12),
+          _TipBox(
+            _leftHanded
+                ? 'Left-handed mode is on. Swipe right to delete, left to keep.'
+                : 'Default mode. Swipe right to keep, left to delete.',
+          ),
+          const SizedBox(height: 28),
 
-          const SizedBox(height: 32),
-
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1C1C1E),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(Icons.lightbulb_outline_rounded,
-                    color: Color(0xFFFFD60A), size: 18),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    _leftHanded
-                        ? 'Left-handed mode is on. Swipe right to delete, swipe left to keep.'
-                        : 'Default mode. Swipe right to keep, swipe left to delete.',
-                    style: const TextStyle(
-                      color: Color(0xFF8E8E93),
-                      fontSize: 13,
-                      height: 1.5,
+          // ── PERMISSIONS ────────────────────────────────────────────────────
+          const _SectionLabel('PERMISSIONS'),
+          _SettingsGroup(
+            children: [
+              _SettingsRow(
+                icon: Icons.photo_library_rounded,
+                iconColor: const Color(0xFF0A84FF),
+                title: 'Photo Library',
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _StatusPill(
+                      label: _permissionLabel,
+                      color: _permissionColor,
                     ),
+                    const SizedBox(width: 8),
+                    const Icon(Icons.chevron_right_rounded,
+                        color: Color(0xFF48484A), size: 20),
+                  ],
+                ),
+                onTap: _openPermissionSettings,
+              ),
+            ],
+          ),
+          const SizedBox(height: 28),
+
+          // ── FEEDBACK ───────────────────────────────────────────────────────
+          const _SectionLabel('FEEDBACK'),
+          _SettingsGroup(
+            children: [
+              _SettingsRow(
+                icon: Icons.star_rounded,
+                iconColor: const Color(0xFFFFD60A),
+                title: 'Rate Photo Swiper',
+                onTap: _rateApp,
+              ),
+              _SettingsRow(
+                icon: Icons.share_rounded,
+                iconColor: const Color(0xFF30D158),
+                title: 'Share App',
+                onTap: _shareApp,
+              ),
+            ],
+          ),
+          const SizedBox(height: 28),
+
+          // ── SUPPORT ────────────────────────────────────────────────────────
+          const _SectionLabel('SUPPORT'),
+          _SettingsGroup(
+            children: [
+              _SettingsRow(
+                icon: Icons.mail_outline_rounded,
+                iconColor: const Color(0xFF6B4EFF),
+                title: 'Contact Support',
+                subtitle: _kSupportEmail,
+                onTap: _contactSupport,
+              ),
+            ],
+          ),
+          const SizedBox(height: 28),
+
+          // ── ABOUT ──────────────────────────────────────────────────────────
+          const _SectionLabel('ABOUT'),
+          _SettingsGroup(
+            children: [
+              _SettingsRow(
+                icon: Icons.info_outline_rounded,
+                iconColor: const Color(0xFF8E8E93),
+                title: 'Version',
+                trailing: Text(
+                  _version.isNotEmpty ? _version : '—',
+                  style: const TextStyle(
+                    color: Color(0xFF8E8E93),
+                    fontSize: 15,
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ],
       ),
@@ -162,7 +289,213 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 }
 
-// ─── Live swipe-direction preview ─────────────────────────────────────────────
+// ─── Shared decoration ────────────────────────────────────────────────────────
+
+const _kCard = BoxDecoration(
+  color: Color(0xFF1C1C1E),
+  borderRadius: BorderRadius.all(Radius.circular(16)),
+);
+
+// ─── _SectionLabel ────────────────────────────────────────────────────────────
+
+class _SectionLabel extends StatelessWidget {
+  final String text;
+  const _SectionLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(left: 4, bottom: 10),
+        child: Text(
+          text,
+          style: const TextStyle(
+            color: Color(0xFF8E8E93),
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.8,
+          ),
+        ),
+      );
+}
+
+// ─── _SettingsGroup ───────────────────────────────────────────────────────────
+// Groups multiple rows in one card with hairline dividers between them.
+
+class _SettingsGroup extends StatelessWidget {
+  final List<Widget> children;
+  const _SettingsGroup({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: _kCard,
+      clipBehavior: Clip.hardEdge,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (int i = 0; i < children.length; i++) ...[
+            children[i],
+            if (i < children.length - 1)
+              const Divider(
+                height: 1,
+                thickness: 1,
+                color: Color(0xFF2C2C2E),
+                indent: 70,
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ─── _SettingsRow ─────────────────────────────────────────────────────────────
+
+class _SettingsRow extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String? subtitle;
+  // Custom trailing widget; when null and onTap != null a chevron is shown.
+  final Widget? trailing;
+  final VoidCallback? onTap;
+
+  const _SettingsRow({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    this.subtitle,
+    this.trailing,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final content = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+      child: Row(
+        children: [
+          _IconChip(icon: icon, color: iconColor),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle!,
+                    style: const TextStyle(
+                      color: Color(0xFF8E8E93),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (trailing != null)
+            trailing!
+          else if (onTap != null)
+            const Icon(Icons.chevron_right_rounded,
+                color: Color(0xFF48484A), size: 20),
+        ],
+      ),
+    );
+
+    if (onTap == null) return content;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: content,
+    );
+  }
+}
+
+// ─── _IconChip ────────────────────────────────────────────────────────────────
+
+class _IconChip extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  const _IconChip({required this.icon, required this.color});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.14),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(icon, color: color, size: 20),
+      );
+}
+
+// ─── _StatusPill ──────────────────────────────────────────────────────────────
+
+class _StatusPill extends StatelessWidget {
+  final String label;
+  final Color color;
+  const _StatusPill({required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.14),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: color,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      );
+}
+
+// ─── _TipBox ──────────────────────────────────────────────────────────────────
+
+class _TipBox extends StatelessWidget {
+  final String text;
+  const _TipBox(this.text);
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(16),
+        decoration: _kCard,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.lightbulb_outline_rounded,
+                color: Color(0xFFFFD60A), size: 18),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                text,
+                style: const TextStyle(
+                  color: Color(0xFF8E8E93),
+                  fontSize: 13,
+                  height: 1.5,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+}
+
+// ─── Swipe direction preview ──────────────────────────────────────────────────
 
 class _SwipePreview extends StatelessWidget {
   final bool leftHanded;
@@ -175,10 +508,7 @@ class _SwipePreview extends StatelessWidget {
 
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1C1C1E),
-        borderRadius: BorderRadius.circular(16),
-      ),
+      decoration: _kCard,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -217,28 +547,23 @@ class _MockCard extends StatelessWidget {
   const _MockCard({required this.leftAction, required this.rightAction});
 
   @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Icon(Icons.arrow_back_ios_rounded, color: leftAction.color, size: 22),
-        Container(
-          width: 100,
-          height: 130,
-          decoration: BoxDecoration(
-            color: const Color(0xFF2C2C2E),
-            borderRadius: BorderRadius.circular(14),
+  Widget build(BuildContext context) => Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Icon(Icons.arrow_back_ios_rounded, color: leftAction.color, size: 22),
+          Container(
+            width: 100,
+            height: 130,
+            decoration: BoxDecoration(
+              color: const Color(0xFF2C2C2E),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Icon(Icons.photo_rounded,
+                color: Color(0xFF48484A), size: 40),
           ),
-          child: const Icon(
-            Icons.photo_rounded,
-            color: Color(0xFF48484A),
-            size: 40,
-          ),
-        ),
-        Icon(Icons.arrow_forward_ios_rounded, color: rightAction.color, size: 22),
-      ],
-    );
-  }
+          Icon(Icons.arrow_forward_ios_rounded, color: rightAction.color, size: 22),
+        ],
+      );
 }
 
 class _DirectionTile extends StatelessWidget {
@@ -247,37 +572,35 @@ class _DirectionTile extends StatelessWidget {
   const _DirectionTile({required this.arrow, required this.action});
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
-      decoration: BoxDecoration(
-        color: action.color.withOpacity(0.09),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: action.color.withOpacity(0.22), width: 1),
-      ),
-      child: Column(
-        children: [
-          Icon(action.icon, color: action.color, size: 26),
-          const SizedBox(height: 6),
-          Text(
-            action.label,
-            style: TextStyle(
-              color: action.color,
-              fontSize: 14,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.5,
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+        decoration: BoxDecoration(
+          color: action.color.withOpacity(0.09),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: action.color.withOpacity(0.22), width: 1),
+        ),
+        child: Column(
+          children: [
+            Icon(action.icon, color: action.color, size: 26),
+            const SizedBox(height: 6),
+            Text(
+              action.label,
+              style: TextStyle(
+                color: action.color,
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.5,
+              ),
             ),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            arrow,
-            style: const TextStyle(
-              color: Color(0xFF8E8E93),
-              fontSize: 12,
+            const SizedBox(height: 3),
+            Text(
+              arrow,
+              style: const TextStyle(
+                color: Color(0xFF8E8E93),
+                fontSize: 12,
+              ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
+          ],
+        ),
+      );
 }
