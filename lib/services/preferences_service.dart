@@ -7,6 +7,7 @@ class PreferencesService {
   static final PreferencesService instance = PreferencesService._();
 
   static const _keyLeftHanded = 'left_handed_mode';
+  static const _keyOnboarding = 'has_seen_onboarding';
 
   late SharedPreferences _prefs;
 
@@ -22,4 +23,10 @@ class PreferencesService {
 
   Future<void> setLeftHanded(bool value) =>
       _prefs.setBool(_keyLeftHanded, value);
+
+  // ─── Onboarding ───────────────────────────────────────────────────────────
+  bool get hasSeenOnboarding => _prefs.getBool(_keyOnboarding) ?? false;
+
+  Future<void> setHasSeenOnboarding(bool value) =>
+      _prefs.setBool(_keyOnboarding, value);
 }

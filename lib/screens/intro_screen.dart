@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../services/preferences_service.dart';
 
 class IntroScreen extends StatefulWidget {
   const IntroScreen({super.key});
@@ -55,6 +56,7 @@ class _IntroScreenState extends State<IntroScreen> {
 
   void _goToPermission() {
     HapticFeedback.lightImpact();
+    PreferencesService.instance.setHasSeenOnboarding(true);
     Navigator.pushReplacementNamed(context, '/permission');
   }
 

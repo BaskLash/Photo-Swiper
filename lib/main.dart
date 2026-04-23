@@ -20,11 +20,15 @@ void main() async {
     statusBarIconBrightness: Brightness.light,
     statusBarBrightness: Brightness.dark,
   ));
-  runApp(const PhotoSwiperApp());
+  final initialRoute = PreferencesService.instance.hasSeenOnboarding
+      ? '/permission'
+      : '/intro';
+  runApp(PhotoSwiperApp(initialRoute: initialRoute));
 }
 
 class PhotoSwiperApp extends StatelessWidget {
-  const PhotoSwiperApp({super.key});
+  final String initialRoute;
+  const PhotoSwiperApp({super.key, required this.initialRoute});
 
   @override
   Widget build(BuildContext context) {
@@ -61,7 +65,7 @@ class PhotoSwiperApp extends StatelessWidget {
       ),
 
       // ── Routes ───────────────────────────────────────────────────────────────
-      initialRoute: '/intro',
+      initialRoute: initialRoute,
       routes: {
         '/intro': (_) => const IntroScreen(),
         '/permission': (_) => const PermissionScreen(),

@@ -2,6 +2,7 @@ import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:photo_manager/photo_manager.dart';
+import '../services/preferences_service.dart';
 
 class PermissionScreen extends StatefulWidget {
   const PermissionScreen({super.key});
@@ -15,6 +16,7 @@ class PermissionScreen extends StatefulWidget {
 class _PermissionScreenState extends State<PermissionScreen>
     with WidgetsBindingObserver {
   bool _requesting = false;
+  bool _silentChecking = false;
 
   // True once the user has explicitly denied and we've shown the fallback.
   // Used to gate the Settings-return re-check so we don't fire it on every
@@ -25,6 +27,11 @@ class _PermissionScreenState extends State<PermissionScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // On return launches, silently check permission to skip straight to home.
+    if (PreferencesService.instance.hasSeenOnboarding) {
+      _silentChecking = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _silentCheck());
+    }
   }
 
   @override
@@ -42,6 +49,23 @@ class _PermissionScreenState extends State<PermissionScreen>
     // If still denied  → stay on the fallback screen; never auto-redirect again.
     if (state == AppLifecycleState.resumed && _showDeniedFallback) {
       _recheckAfterSettings();
+    }
+  }
+
+  Future<void> _silentCheck() async {
+    if (!Platform.isAndroid && !Platform.isIOS) {
+      _goHome();
+      return;
+    }
+    final ps = await PhotoManager.requestPermissionExtend();
+    if (!mounted) return;
+    if (ps.isAuth || ps.hasAccess) {
+      _goHome();
+    } else {
+      setState(() {
+        _silentChecking = false;
+        _showDeniedFallback = true;
+      });
     }
   }
 
@@ -111,6 +135,10 @@ class _PermissionScreenState extends State<PermissionScreen>
 
   @override
   Widget build(BuildContext context) {
+    if (_silentChecking) {
+      return const Scaffold(backgroundColor: Color(0xFF0D0D0D));
+    }
+
     if (!Platform.isAndroid && !Platform.isIOS) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _goHome());
       return const Scaffold(
