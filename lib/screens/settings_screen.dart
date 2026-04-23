@@ -10,7 +10,7 @@ import '../services/preferences_service.dart';
 // Replace with real values before shipping
 // Aktualisierte Werte für FlickClean
 const _kAppStoreId = '6761820156';
-const _kSupportEmail = 'support@flickclean.app'; // Prüfe, ob diese Adresse korrekt ist
+const _kSupportEmail = 'business.promptin@gmail.com'; // Prüfe, ob diese Adresse korrekt ist
 const _kShareText =
     'Check out FlickClean – the fastest way to clean up your photo library! 📷\n'
     'https://apps.apple.com/app/id$_kAppStoreId';
