@@ -9,6 +9,7 @@ import '../models/swipe_item.dart';
 import '../services/media_service.dart';
 import '../services/preferences_service.dart';
 import '../widgets/swipe_card.dart';
+import '../widgets/video_preview_card.dart';
 import 'review_screen.dart';
 
 enum SwipeMode { month, today, random }
@@ -386,6 +387,38 @@ class _SwipeScreenState extends State<SwipeScreen> {
   }
 
   Widget _buildMediaCard(SwipeItem item) {
+    final isVideo = item.asset.type == AssetType.video;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (isVideo)
+            // VideoPreviewCard is self-contained: loads the file, auto-plays
+            // muted + looping, fades from thumbnail to live video, handles
+            // tap to pause/resume. No InteractiveViewer — zoom makes no sense
+            // for video, and omitting it keeps swipe gestures unambiguous.
+            VideoPreviewCard(
+              asset: item.asset,
+              thumbBytes: _thumbCache[item.asset.id],
+            )
+          else
+            _buildImageLayer(item),
+
+          if (isVideo)
+            Positioned(
+              top: 12,
+              left: 12,
+              child: _buildVideoBadge(item.asset),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // ── Image layer: blurred fill + scrim + contain foreground + zoom ────────────
+
+  Widget _buildImageLayer(SwipeItem item) {
     final id = item.asset.id;
     final cached = _thumbCache[id];
 
@@ -432,51 +465,39 @@ class _SwipeScreenState extends State<SwipeScreen> {
       );
     }
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: Stack(
-        fit: StackFit.expand,
+    // panEnabled mirrors _isZoomed:
+    //   • false at scale 1 → single-finger drag reaches SwipeCard's recognizer
+    //   • true when zoomed  → SwipeCard nulls its callbacks, IV wins the arena
+    return InteractiveViewer(
+      transformationController: _zoomController,
+      minScale: 1.0,
+      maxScale: 5.0,
+      panEnabled: _isZoomed,
+      clipBehavior: Clip.none,
+      child: imageWidget,
+    );
+  }
+
+  // ── Video badge: camera icon + duration + muted indicator ────────────────────
+
+  Widget _buildVideoBadge(AssetEntity asset) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.65),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // InteractiveViewer lives inside the ClipRRect so overflow is clipped
-          // at the card boundary with rounded corners.
-          // panEnabled mirrors _isZoomed:
-          //   • false at scale 1 → single-finger drag reaches SwipeCard's recognizer
-          //   • true when zoomed  → SwipeCard nulls its callbacks, IV wins the arena
-          InteractiveViewer(
-            transformationController: _zoomController,
-            minScale: 1.0,
-            maxScale: 5.0,
-            panEnabled: _isZoomed,
-            clipBehavior: Clip.none,
-            child: imageWidget,
+          const Icon(Icons.videocam_rounded, color: Colors.white, size: 14),
+          const SizedBox(width: 4),
+          Text(
+            _formatDuration(asset.videoDuration),
+            style: const TextStyle(color: Colors.white, fontSize: 12),
           ),
-          // Video duration badge — fixed position, not affected by zoom
-          if (item.asset.type == AssetType.video)
-            Positioned(
-              top: 12,
-              left: 12,
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.65),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.videocam_rounded,
-                        color: Colors.white, size: 14),
-                    const SizedBox(width: 4),
-                    Text(
-                      _formatDuration(item.asset.videoDuration),
-                      style: const TextStyle(
-                          color: Colors.white, fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+          const SizedBox(width: 6),
+          const Icon(Icons.volume_off_rounded, color: Colors.white, size: 12),
         ],
       ),
     );
@@ -595,6 +616,18 @@ class _SwipeScreenState extends State<SwipeScreen> {
                       if (!isActive)
                         Container(
                           color: Colors.black.withOpacity(0.28),
+                        ),
+
+                      // Video indicator in the top-right corner
+                      if (_items[index].asset.type == AssetType.video)
+                        Positioned(
+                          top: 3,
+                          right: 3,
+                          child: Icon(
+                            Icons.play_circle_filled_rounded,
+                            color: Colors.white.withOpacity(0.85),
+                            size: 14,
+                          ),
                         ),
 
                       // Decision colour bar at the bottom edge
