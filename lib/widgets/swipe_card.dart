@@ -1,7 +1,12 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 
 /// Tinder-style swipe card with animated KEEP / DELETE overlays.
-/// Uses a single AnimationController for both fly-off and snap-back.
+///
+/// Motion-based guidance: after [_idleDelay] of no touch, the card plays a
+/// gentle two-phase nudge (KEEP direction then DELETE direction) so users
+/// feel which way to swipe without needing to read text. The nudge runs at
+/// most once per card instance and stops permanently once [hintOpacity] == 0.
 ///
 /// Provide a unique [ValueKey] tied to the current item index so Flutter
 /// creates a fresh widget (and fresh gesture state) for every new card.
@@ -9,14 +14,13 @@ class SwipeCard extends StatefulWidget {
   final Widget child;
   final VoidCallback onSwipeLeft;
   final VoidCallback onSwipeRight;
-  /// When true the stamp labels are flipped so the visual feedback always
-  /// matches the actual action: right = DELETE (red), left = KEEP (green).
+  /// When true stamp labels are flipped: right = DELETE, left = KEEP.
   final bool leftHandedMode;
-  /// When true the card ignores all horizontal drag gestures so the
-  /// InteractiveViewer inside the child can pan a zoomed image freely.
+  /// When true horizontal-drag recognizers are removed so InteractiveViewer
+  /// can pan a zoomed image freely.
   final bool isZoomed;
-  /// 0.0 → hints invisible; 1.0 → fully visible. Driven by the parent based on
-  /// how many swipes the user has completed. Should reach 0 after ~15 swipes.
+  /// > 0  → idle-nudge guidance is active for this card.
+  ///   0  → user has swiped enough; nudge never fires.
   final double hintOpacity;
 
   const SwipeCard({
@@ -33,40 +37,128 @@ class SwipeCard extends StatefulWidget {
   State<SwipeCard> createState() => _SwipeCardState();
 }
 
-class _SwipeCardState extends State<SwipeCard>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-  double _offset = 0;
-  bool _locked = false; // true while animated fly-off / snap-back
+class _SwipeCardState extends State<SwipeCard> with TickerProviderStateMixin {
+  late final AnimationController _ctrl;      // fly-off / snap-back
+  late final AnimationController _nudgeCtrl; // idle nudge sequence
 
-  static const double _swipeThresholdPx = 80;
-  static const double _swipeThresholdVelocity = 600;
+  double _offset = 0;
+  bool _locked  = false; // true while fly-off or snap-back animates
+  bool _nudging = false; // true while nudge sequence is running
+  bool _nudgePlayed = false; // at most one nudge per card instance
+  Timer? _idleTimer;
+
+  static const double _swipeThresholdPx       = 80;
+  static const double _swipeThresholdVelocity  = 600;
+  static const double _nudgeDistance           = 30; // px
+  static const Duration _idleDelay             = Duration(seconds: 3);
 
   @override
   void initState() {
     super.initState();
-    _ctrl = AnimationController(vsync: this);
+    _ctrl      = AnimationController(vsync: this);
+    _nudgeCtrl = AnimationController(vsync: this);
+    // Wait for the first frame so layout dimensions are ready.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _startIdleTimer());
   }
 
   @override
   void dispose() {
+    _idleTimer?.cancel();
     _ctrl.dispose();
+    _nudgeCtrl.dispose();
     super.dispose();
+  }
+
+  // ─── Idle nudge ───────────────────────────────────────────────────────────────
+
+  void _startIdleTimer() {
+    _idleTimer?.cancel();
+    if (widget.hintOpacity <= 0 || _nudgePlayed || _nudging || _locked) return;
+    _idleTimer = Timer(_idleDelay, _performNudge);
+  }
+
+  /// Cancel any pending timer and interrupt an in-progress nudge.
+  /// The card stays at its current offset so a user drag continues seamlessly.
+  void _cancelIdleTimer() {
+    _idleTimer?.cancel();
+    _idleTimer = null;
+    if (_nudging) {
+      // canceled: false → TickerFuture completes normally instead of throwing.
+      _nudgeCtrl.stop(canceled: false);
+      _nudging = false;
+    }
+  }
+
+  Future<void> _performNudge() async {
+    if (_locked || _nudging || _nudgePlayed || !mounted) return;
+    if (widget.hintOpacity <= 0) return;
+
+    _nudgePlayed = true;
+    _nudging     = true;
+
+    // Nudge KEEP direction first (the encouraging action), then DELETE.
+    // Default:      KEEP = right (+1), DELETE = left (−1)
+    // Left-handed:  KEEP = left  (−1), DELETE = right (+1)
+    final keepSign = widget.leftHandedMode ? -1.0 : 1.0;
+
+    // Phase 1 — drift toward KEEP, snap back
+    await _animateNudge(keepSign * _nudgeDistance, 360, Curves.easeOut);
+    if (!_nudging || !mounted) return;
+    await Future.delayed(const Duration(milliseconds: 100));
+    if (!_nudging || !mounted) return;
+    await _animateNudge(0, 300, Curves.easeInOut);
+    if (!_nudging || !mounted) return;
+
+    await Future.delayed(const Duration(milliseconds: 220));
+    if (!_nudging || !mounted) return;
+
+    // Phase 2 — drift toward DELETE, snap back
+    await _animateNudge(-keepSign * _nudgeDistance, 360, Curves.easeOut);
+    if (!_nudging || !mounted) return;
+    await Future.delayed(const Duration(milliseconds: 80));
+    if (!_nudging || !mounted) return;
+    await _animateNudge(0, 300, Curves.easeInOut);
+
+    _nudging = false;
+  }
+
+  /// Animate `_offset` to [target] over [ms] milliseconds using [curve].
+  /// Uses try/finally so a stop(canceled:false) always removes the listener.
+  Future<void> _animateNudge(double target, int ms, Curve curve) async {
+    if (!mounted) return;
+    _nudgeCtrl.duration = Duration(milliseconds: ms);
+    final anim = Tween<double>(begin: _offset, end: target)
+        .animate(CurvedAnimation(parent: _nudgeCtrl, curve: curve));
+
+    void listener() {
+      if (mounted) setState(() => _offset = anim.value);
+    }
+
+    anim.addListener(listener);
+    try {
+      await _nudgeCtrl.forward(from: 0);
+    } catch (_) {
+      // TickerCanceled — nudge was interrupted; exit cleanly.
+    } finally {
+      anim.removeListener(listener);
+      _nudgeCtrl.reset();
+    }
   }
 
   // ─── Gesture handlers ────────────────────────────────────────────────────────
 
   void _onUpdate(DragUpdateDetails d) {
     if (_locked) return;
+    _cancelIdleTimer(); // any touch cancels the nudge immediately
     setState(() => _offset += d.delta.dx);
   }
 
   void _onEnd(DragEndDetails d) {
     if (_locked) return;
+    _cancelIdleTimer(); // defensive: catch tap-release without prior _onUpdate
     final vx = d.velocity.pixelsPerSecond.dx;
     final shouldSwipe =
         _offset.abs() > _swipeThresholdPx || vx.abs() > _swipeThresholdVelocity;
-
     if (shouldSwipe) {
       _flyOff(_offset > 0 || (_offset.abs() < 10 && vx > 0));
     } else {
@@ -78,13 +170,14 @@ class _SwipeCardState extends State<SwipeCard>
 
   Future<void> _flyOff(bool right) async {
     if (!mounted) return;
+    _cancelIdleTimer(); // stop nudge if action-button triggered during nudge
     _locked = true;
     final screenW = MediaQuery.of(context).size.width;
-    final target = right ? screenW * 2.0 : -screenW * 2.0;
+    final target  = right ? screenW * 2.0 : -screenW * 2.0;
 
     _ctrl.duration = const Duration(milliseconds: 280);
-    final anim = Tween<double>(begin: _offset, end: target).animate(
-        CurvedAnimation(parent: _ctrl, curve: Curves.easeIn));
+    final anim = Tween<double>(begin: _offset, end: target)
+        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeIn));
 
     void listener() {
       if (mounted) setState(() => _offset = anim.value);
@@ -106,8 +199,8 @@ class _SwipeCardState extends State<SwipeCard>
   Future<void> _snapBack() async {
     _locked = true;
     _ctrl.duration = const Duration(milliseconds: 420);
-    final anim = Tween<double>(begin: _offset, end: 0.0).animate(
-        CurvedAnimation(parent: _ctrl, curve: Curves.elasticOut));
+    final anim = Tween<double>(begin: _offset, end: 0.0)
+        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.elasticOut));
 
     void listener() {
       if (mounted) setState(() => _offset = anim.value);
@@ -123,16 +216,25 @@ class _SwipeCardState extends State<SwipeCard>
       _locked = false;
     });
     _ctrl.reset();
+    // User is still on this card after a failed swipe — restart the idle timer
+    // so the nudge can still play if it hasn't yet.
+    _startIdleTimer();
   }
 
-  // ─── Programmatic swipe (called by action buttons) ───────────────────────────
+  // ─── Programmatic swipe (action buttons) ─────────────────────────────────────
 
   void swipeLeft() {
-    if (!_locked && !widget.isZoomed) _flyOff(false);
+    if (!_locked && !widget.isZoomed) {
+      _cancelIdleTimer();
+      _flyOff(false);
+    }
   }
 
   void swipeRight() {
-    if (!_locked && !widget.isZoomed) _flyOff(true);
+    if (!_locked && !widget.isZoomed) {
+      _cancelIdleTimer();
+      _flyOff(true);
+    }
   }
 
   // ─── Build ───────────────────────────────────────────────────────────────────
@@ -140,38 +242,28 @@ class _SwipeCardState extends State<SwipeCard>
   @override
   Widget build(BuildContext context) {
     final screenW = MediaQuery.of(context).size.width;
-    final rotate = (_offset / screenW * 0.28).clamp(-0.5, 0.5);
-    // Opacity driven by drag direction, independent of handedness
-    final rightOp = (_offset / 180).clamp(0.0, 1.0);   // dragging right
-    final leftOp  = (-_offset / 180).clamp(0.0, 1.0);  // dragging left
+    final rotate  = (_offset / screenW * 0.28).clamp(-0.5, 0.5);
+    // Stamp opacity is purely offset-driven — works for both manual drag and
+    // the nudge animation (faint colour tint appears during the nudge as a
+    // secondary signal, but motion is always the primary cue).
+    final rightOp = (_offset / 180).clamp(0.0, 1.0);
+    final leftOp  = (-_offset / 180).clamp(0.0, 1.0);
 
-    // In left-handed mode the right swipe is DELETE and the left swipe is KEEP
     final rightLabel = widget.leftHandedMode ? 'DELETE' : 'KEEP';
     final rightColor = widget.leftHandedMode
         ? const Color(0xFFFF453A)
         : const Color(0xFF30D158);
-    final rightIcon = widget.leftHandedMode
-        ? Icons.delete_outline_rounded
-        : Icons.favorite_rounded;
 
     final leftLabel = widget.leftHandedMode ? 'KEEP' : 'DELETE';
     final leftColor = widget.leftHandedMode
         ? const Color(0xFF30D158)
         : const Color(0xFFFF453A);
-    final leftIcon = widget.leftHandedMode
-        ? Icons.favorite_rounded
-        : Icons.delete_outline_rounded;
-
-    // Edge hints fade to zero as the drag starts — within 80 px of movement
-    // the stamp overlays take over. At rest they show at full hintOpacity.
-    final edgeHintOp =
-        (1.0 - _offset.abs() / 80.0).clamp(0.0, 1.0) * widget.hintOpacity;
 
     // Setting callbacks to null when zoomed removes those recognizers from the
     // gesture arena, letting InteractiveViewer's pan recognizer win instead.
     return GestureDetector(
       onHorizontalDragUpdate: widget.isZoomed ? null : _onUpdate,
-      onHorizontalDragEnd: widget.isZoomed ? null : _onEnd,
+      onHorizontalDragEnd:   widget.isZoomed ? null : _onEnd,
       child: RepaintBoundary(
         child: Transform(
           transform: Matrix4.identity()
@@ -182,28 +274,9 @@ class _SwipeCardState extends State<SwipeCard>
             fit: StackFit.expand,
             children: [
               widget.child,
-
-              // ── Edge direction hints (bottom corners, at rest) ───────────────
-              // Sit below the stamp overlays so stamps always win visually.
-              // Separated to opposite corners: hints at bottom, stamps at top.
-              if (edgeHintOp > 0.01) ...[
-                _EdgeHint(
-                  isLeft: true,
-                  label: leftLabel,
-                  icon: leftIcon,
-                  color: leftColor.withOpacity(0.80),
-                  opacity: edgeHintOp,
-                ),
-                _EdgeHint(
-                  isLeft: false,
-                  label: rightLabel,
-                  icon: rightIcon,
-                  color: rightColor.withOpacity(0.80),
-                  opacity: edgeHintOp,
-                ),
-              ],
-
-              // ── Stamp overlays (top corners, during drag) ────────────────────
+              // Stamp appears on the side the user is dragging FROM.
+              // Also triggers at ~17 % opacity during the nudge, giving a
+              // subtle colour hint that reinforces the motion direction.
               if (rightOp > 0.04)
                 _StampOverlay(
                   label: rightLabel,
@@ -221,75 +294,6 @@ class _SwipeCardState extends State<SwipeCard>
                   angle: 0.25,
                 ),
             ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Edge direction hint (bottom corner pill) ────────────────────────────────
-//
-// Shown at rest to orient new users. Fades to zero as the drag starts
-// (the stamp overlays take over) and fades out permanently after ~15 swipes.
-//
-// LEFT pill:  ← [icon] LABEL      (arrow on the outside, pointing left)
-// RIGHT pill: LABEL [icon] →      (arrow on the outside, pointing right)
-
-class _EdgeHint extends StatelessWidget {
-  final bool isLeft;
-  final String label;
-  final IconData icon;
-  final Color color; // pre-multiplied alpha from caller
-  final double opacity;
-
-  const _EdgeHint({
-    required this.isLeft,
-    required this.label,
-    required this.icon,
-    required this.color,
-    required this.opacity,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    // Build row items left-to-right for the LEFT hint; reversed for the RIGHT.
-    final items = <Widget>[
-      Icon(
-        isLeft ? Icons.chevron_left_rounded : Icons.chevron_right_rounded,
-        color: Colors.white,
-        size: 12,
-      ),
-      const SizedBox(width: 3),
-      Icon(icon, color: Colors.white, size: 14),
-      const SizedBox(width: 3),
-      Text(
-        label,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 9,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.6,
-        ),
-      ),
-    ];
-
-    return Positioned(
-      bottom: 20,
-      left: isLeft ? 14 : null,
-      right: isLeft ? null : 14,
-      child: Opacity(
-        opacity: opacity.clamp(0.0, 1.0),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            // RIGHT hint reverses the list so the arrow ends up on the right.
-            children: isLeft ? items : items.reversed.toList(),
           ),
         ),
       ),

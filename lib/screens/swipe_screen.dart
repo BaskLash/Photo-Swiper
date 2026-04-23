@@ -101,11 +101,11 @@ class _SwipeScreenState extends State<SwipeScreen> {
     _isZoomed = false;
   }
 
-  // Edge hints start at 65 % opacity and reach 0 after 15 swipes, giving
-  // new users clear guidance that fades as they build muscle memory.
+  // Motion nudge is active for the first 7 swipes; after that the user has
+  // built muscle memory and the idle-nudge animation is suppressed.
   double get _hintOpacity {
-    if (_swipeHintCount >= 15) return 0.0;
-    return (1.0 - _swipeHintCount / 15.0) * 0.65;
+    if (_swipeHintCount >= 7) return 0.0;
+    return 1.0 - _swipeHintCount / 7.0;
   }
 
   // ─── Loading ─────────────────────────────────────────────────────────────────
@@ -196,7 +196,7 @@ class _SwipeScreenState extends State<SwipeScreen> {
       _currentIndex++;
       _cardKey++;
       // Increment locally for immediate opacity update; persist async below.
-      if (_swipeHintCount < 20) _swipeHintCount++;
+      if (_swipeHintCount < 7) _swipeHintCount++;
     });
 
     PreferencesService.instance.incrementSwipeHintCount();
