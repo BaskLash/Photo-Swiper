@@ -8,6 +8,7 @@ class PreferencesService {
 
   static const _keyLeftHanded = 'left_handed_mode';
   static const _keyOnboarding = 'has_seen_onboarding';
+  static const _keySwipeHintCount = 'swipe_hint_count';
 
   late SharedPreferences _prefs;
 
@@ -29,4 +30,14 @@ class PreferencesService {
 
   Future<void> setHasSeenOnboarding(bool value) =>
       _prefs.setBool(_keyOnboarding, value);
+
+  // ─── Swipe hint fade-out ──────────────────────────────────────────────────
+  // Counts completed swipes; used to progressively fade the edge direction
+  // hints. Capped at 20 — once hints are invisible there's no point tracking.
+  int get swipeHintCount => _prefs.getInt(_keySwipeHintCount) ?? 0;
+
+  Future<void> incrementSwipeHintCount() async {
+    final n = swipeHintCount;
+    if (n < 20) await _prefs.setInt(_keySwipeHintCount, n + 1);
+  }
 }

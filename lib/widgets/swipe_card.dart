@@ -15,6 +15,9 @@ class SwipeCard extends StatefulWidget {
   /// When true the card ignores all horizontal drag gestures so the
   /// InteractiveViewer inside the child can pan a zoomed image freely.
   final bool isZoomed;
+  /// 0.0 → hints invisible; 1.0 → fully visible. Driven by the parent based on
+  /// how many swipes the user has completed. Should reach 0 after ~15 swipes.
+  final double hintOpacity;
 
   const SwipeCard({
     super.key,
@@ -23,6 +26,7 @@ class SwipeCard extends StatefulWidget {
     required this.onSwipeRight,
     this.leftHandedMode = false,
     this.isZoomed = false,
+    this.hintOpacity = 0.0,
   });
 
   @override
@@ -146,11 +150,22 @@ class _SwipeCardState extends State<SwipeCard>
     final rightColor = widget.leftHandedMode
         ? const Color(0xFFFF453A)
         : const Color(0xFF30D158);
+    final rightIcon = widget.leftHandedMode
+        ? Icons.delete_outline_rounded
+        : Icons.favorite_rounded;
 
     final leftLabel = widget.leftHandedMode ? 'KEEP' : 'DELETE';
     final leftColor = widget.leftHandedMode
         ? const Color(0xFF30D158)
         : const Color(0xFFFF453A);
+    final leftIcon = widget.leftHandedMode
+        ? Icons.favorite_rounded
+        : Icons.delete_outline_rounded;
+
+    // Edge hints fade to zero as the drag starts — within 80 px of movement
+    // the stamp overlays take over. At rest they show at full hintOpacity.
+    final edgeHintOp =
+        (1.0 - _offset.abs() / 80.0).clamp(0.0, 1.0) * widget.hintOpacity;
 
     // Setting callbacks to null when zoomed removes those recognizers from the
     // gesture arena, letting InteractiveViewer's pan recognizer win instead.
@@ -167,7 +182,28 @@ class _SwipeCardState extends State<SwipeCard>
             fit: StackFit.expand,
             children: [
               widget.child,
-              // Stamp appears on the side the user is dragging FROM (Tinder convention)
+
+              // ── Edge direction hints (bottom corners, at rest) ───────────────
+              // Sit below the stamp overlays so stamps always win visually.
+              // Separated to opposite corners: hints at bottom, stamps at top.
+              if (edgeHintOp > 0.01) ...[
+                _EdgeHint(
+                  isLeft: true,
+                  label: leftLabel,
+                  icon: leftIcon,
+                  color: leftColor.withOpacity(0.80),
+                  opacity: edgeHintOp,
+                ),
+                _EdgeHint(
+                  isLeft: false,
+                  label: rightLabel,
+                  icon: rightIcon,
+                  color: rightColor.withOpacity(0.80),
+                  opacity: edgeHintOp,
+                ),
+              ],
+
+              // ── Stamp overlays (top corners, during drag) ────────────────────
               if (rightOp > 0.04)
                 _StampOverlay(
                   label: rightLabel,
@@ -185,6 +221,75 @@ class _SwipeCardState extends State<SwipeCard>
                   angle: 0.25,
                 ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Edge direction hint (bottom corner pill) ────────────────────────────────
+//
+// Shown at rest to orient new users. Fades to zero as the drag starts
+// (the stamp overlays take over) and fades out permanently after ~15 swipes.
+//
+// LEFT pill:  ← [icon] LABEL      (arrow on the outside, pointing left)
+// RIGHT pill: LABEL [icon] →      (arrow on the outside, pointing right)
+
+class _EdgeHint extends StatelessWidget {
+  final bool isLeft;
+  final String label;
+  final IconData icon;
+  final Color color; // pre-multiplied alpha from caller
+  final double opacity;
+
+  const _EdgeHint({
+    required this.isLeft,
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.opacity,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Build row items left-to-right for the LEFT hint; reversed for the RIGHT.
+    final items = <Widget>[
+      Icon(
+        isLeft ? Icons.chevron_left_rounded : Icons.chevron_right_rounded,
+        color: Colors.white,
+        size: 12,
+      ),
+      const SizedBox(width: 3),
+      Icon(icon, color: Colors.white, size: 14),
+      const SizedBox(width: 3),
+      Text(
+        label,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 9,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.6,
+        ),
+      ),
+    ];
+
+    return Positioned(
+      bottom: 20,
+      left: isLeft ? 14 : null,
+      right: isLeft ? null : 14,
+      child: Opacity(
+        opacity: opacity.clamp(0.0, 1.0),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            // RIGHT hint reverses the list so the arrow ends up on the right.
+            children: isLeft ? items : items.reversed.toList(),
           ),
         ),
       ),

@@ -48,6 +48,10 @@ class _SwipeScreenState extends State<SwipeScreen> {
   // Read once at screen creation so the session stays consistent
   late final bool _leftHanded;
 
+  // Tracks how many swipes the user has made this install; drives hint opacity.
+  // Stored locally for immediate UI response; persisted async via prefs.
+  late int _swipeHintCount;
+
   // ─── Zoom state ───────────────────────────────────────────────────────────────
   // Shared between InteractiveViewer (inside the card) and SwipeCard (gesture
   // coordination). When _isZoomed is true SwipeCard disables its horizontal-drag
@@ -71,6 +75,7 @@ class _SwipeScreenState extends State<SwipeScreen> {
   void initState() {
     super.initState();
     _leftHanded = PreferencesService.instance.isLeftHanded;
+    _swipeHintCount = PreferencesService.instance.swipeHintCount;
     _zoomController.addListener(_onZoomChanged);
     _load();
   }
@@ -94,6 +99,13 @@ class _SwipeScreenState extends State<SwipeScreen> {
   void _resetZoom() {
     _zoomController.value = Matrix4.identity();
     _isZoomed = false;
+  }
+
+  // Edge hints start at 65 % opacity and reach 0 after 15 swipes, giving
+  // new users clear guidance that fades as they build muscle memory.
+  double get _hintOpacity {
+    if (_swipeHintCount >= 15) return 0.0;
+    return (1.0 - _swipeHintCount / 15.0) * 0.65;
   }
 
   // ─── Loading ─────────────────────────────────────────────────────────────────
@@ -183,7 +195,11 @@ class _SwipeScreenState extends State<SwipeScreen> {
       _items[_currentIndex].decision = decision;
       _currentIndex++;
       _cardKey++;
+      // Increment locally for immediate opacity update; persist async below.
+      if (_swipeHintCount < 20) _swipeHintCount++;
     });
+
+    PreferencesService.instance.incrementSwipeHintCount();
 
     if (_currentIndex >= _items.length) {
       _onSessionComplete();
@@ -361,6 +377,7 @@ class _SwipeScreenState extends State<SwipeScreen> {
                 key: ValueKey(_cardKey),
                 leftHandedMode: _leftHanded,
                 isZoomed: _isZoomed,
+                hintOpacity: _hintOpacity,
                 onSwipeLeft: () => _decide(
                     _leftHanded ? SwipeDecision.keep : SwipeDecision.delete),
                 onSwipeRight: () => _decide(
