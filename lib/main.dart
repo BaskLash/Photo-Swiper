@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -5,10 +7,15 @@ import 'screens/intro_screen.dart';
 import 'screens/permission_screen.dart';
 import 'screens/home_screen.dart';
 import 'services/preferences_service.dart';
+import 'services/purchase_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await PreferencesService.instance.init();
+  // RevenueCat init runs in the background — UI doesn't block on it.
+  // Pre-purchase state defaults to free; the listener flips us to pro the
+  // moment configure() returns with an active entitlement.
+  unawaited(PurchaseService.instance.init());
   // Lock to portrait
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
