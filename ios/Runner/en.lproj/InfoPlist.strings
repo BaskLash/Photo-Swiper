@@ -1,0 +1,3 @@
+/* Permission strings — English */
+"CFBundleDisplayName" = "Photo Swiper";
+"NSPhotoLibraryUsageDescription" = "PhotoSwiper needs access to your photos so you can review and tidy them up by swiping.";

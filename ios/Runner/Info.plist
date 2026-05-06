@@ -23,7 +23,7 @@
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>PhotoSwiper benötigt Zugriff auf deine Fotos, um sie dir anzuzeigen und zum Swipen bereitzustellen.</string>
+	<string>PhotoSwiper needs access to your photos so you can review and tidy them up by swiping.</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>

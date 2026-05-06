@@ -1,0 +1,3 @@
+/* Permission strings — German */
+"CFBundleDisplayName" = "Photo Swiper";
+"NSPhotoLibraryUsageDescription" = "PhotoSwiper benötigt Zugriff auf deine Fotos, um sie anzuzeigen und durch Wischen aufzuräumen.";
