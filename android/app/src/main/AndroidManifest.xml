@@ -30,6 +30,17 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- PostHog (EU instance). Replace the API_KEY value before shipping. -->
+        <meta-data
+            android:name="com.posthog.posthog.API_KEY"
+            android:value="phc_trqvMQjTs8rPxS9fWz6CDYyeiRjSY6STRBBEnZy7KCcS" />
+        <meta-data
+            android:name="com.posthog.posthog.POSTHOG_HOST"
+            android:value="https://eu.i.posthog.com" />
+        <meta-data
+            android:name="com.posthog.posthog.TRACK_APPLICATION_LIFECYCLE_EVENTS"
+            android:value="true" />
     </application>
 
     <!-- Queries-Block (bereits vorhanden) -->

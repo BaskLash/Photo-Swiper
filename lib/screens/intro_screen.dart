@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../services/analytics_service.dart';
 import '../services/preferences_service.dart';
 
 class IntroScreen extends StatefulWidget {
@@ -36,6 +38,12 @@ class _IntroScreenState extends State<IntroScreen> {
           'Review your picks before anything is deleted.\nSee exactly how much storage you\'ll reclaim.',
     ),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(AnalyticsService.instance.screen('intro_screen'));
+  }
 
   @override
   void dispose() {

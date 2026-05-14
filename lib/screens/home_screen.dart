@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../services/analytics_service.dart';
 import '../services/media_service.dart';
 import 'swipe_screen.dart';
 import 'grid_select_screen.dart';
@@ -30,6 +32,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    unawaited(AnalyticsService.instance.screen('home_screen'));
     _init();
   }
 

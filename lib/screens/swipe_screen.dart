@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:typed_data';
@@ -6,6 +7,8 @@ import 'dart:ui' show ImageFilter;
 import 'package:photo_manager/photo_manager.dart';
 
 import '../models/swipe_item.dart';
+import '../services/analytics_events.dart';
+import '../services/analytics_service.dart';
 import '../services/media_service.dart';
 import '../services/preferences_service.dart';
 import '../services/purchase_service.dart';
@@ -54,6 +57,13 @@ class _SwipeScreenState extends State<SwipeScreen> {
   // Stored locally for immediate UI response; persisted async via prefs.
   late int _swipeHintCount;
 
+  // Tracks the number of swipes made in this session and whether we've already
+  // emitted cleanup_paused on dispose. We emit cleanup_paused only when the
+  // user navigates away mid-session — not after they've reached the review
+  // screen (which navigates via pushReplacement, dropping this state).
+  int _swipesThisSession = 0;
+  bool _sessionCompleted = false;
+
   // ─── Zoom state ───────────────────────────────────────────────────────────────
   // Shared between InteractiveViewer (inside the card) and SwipeCard (gesture
   // coordination). When _isZoomed is true SwipeCard disables its horizontal-drag
@@ -80,11 +90,26 @@ class _SwipeScreenState extends State<SwipeScreen> {
     _swipeHintCount = PreferencesService.instance.swipeHintCount;
     _zoomController.addListener(_onZoomChanged);
     PurchaseService.instance.addListener(_onProStatusChanged);
+    unawaited(AnalyticsService.instance.screen('swipe_screen', properties: {
+      'mode': widget.mode.name,
+    }));
     _load();
   }
 
   @override
   void dispose() {
+    if (!_sessionCompleted &&
+        _items.isNotEmpty &&
+        _currentIndex < _items.length) {
+      unawaited(AnalyticsService.instance.track(
+        AnalyticsEvents.cleanupPaused,
+        properties: {
+          'swipes_completed': _swipesThisSession,
+          'photos_remaining': _items.length - _currentIndex,
+          'mode': widget.mode.name,
+        },
+      ));
+    }
     _zoomController.removeListener(_onZoomChanged);
     _zoomController.dispose();
     _stripController.dispose();
@@ -126,6 +151,12 @@ class _SwipeScreenState extends State<SwipeScreen> {
       _error = null;
     });
 
+    final startedAt = DateTime.now();
+    unawaited(AnalyticsService.instance.track(
+      AnalyticsEvents.galleryLoadStarted,
+      properties: {'mode': widget.mode.name},
+    ));
+
     try {
       List<AssetEntity> assets;
       switch (widget.mode) {
@@ -140,11 +171,37 @@ class _SwipeScreenState extends State<SwipeScreen> {
 
       final items = assets.map((a) => SwipeItem(asset: a)).toList();
 
+      unawaited(AnalyticsService.instance.track(
+        AnalyticsEvents.galleryLoadCompleted,
+        properties: {
+          'mode': widget.mode.name,
+          'photo_count': assets.length,
+          'load_time_ms': DateTime.now().difference(startedAt).inMilliseconds,
+        },
+      ));
+
       if (!mounted) return;
       setState(() {
         _items = items;
         _loading = false;
       });
+
+      if (items.isNotEmpty) {
+        final cleanupProps = <String, Object>{
+          'mode': widget.mode.name,
+          'photos_in_session': items.length,
+        };
+        if (widget.mode == SwipeMode.month &&
+            widget.month != null &&
+            widget.year != null) {
+          cleanupProps['month'] =
+              '${widget.year}-${widget.month!.toString().padLeft(2, '0')}';
+        }
+        unawaited(AnalyticsService.instance.track(
+          AnalyticsEvents.cleanupStarted,
+          properties: cleanupProps,
+        ));
+      }
 
       // Preload thumbnails for first 3 items
       for (int i = 0; i < items.length && i < 3; i++) {
@@ -155,6 +212,20 @@ class _SwipeScreenState extends State<SwipeScreen> {
         _loadFileSize(i);
       }
     } catch (e) {
+      unawaited(AnalyticsService.instance.track(
+        AnalyticsEvents.galleryLoadFailed,
+        properties: {
+          'mode': widget.mode.name,
+          'error_type': e.runtimeType.toString(),
+        },
+      ));
+      unawaited(AnalyticsService.instance.track(
+        AnalyticsEvents.errorOccurred,
+        properties: {
+          'error_type': e.runtimeType.toString(),
+          'context': 'gallery_load_swipe',
+        },
+      ));
       if (!mounted) return;
       setState(() {
         _error = 'Could not load media. Please check permissions.';
@@ -214,6 +285,8 @@ class _SwipeScreenState extends State<SwipeScreen> {
     HapticFeedback.selectionClick();
     _resetZoom();
 
+    final positionBeforeSwipe = _currentIndex;
+
     setState(() {
       _items[_currentIndex].decision = decision;
       _currentIndex++;
@@ -222,10 +295,21 @@ class _SwipeScreenState extends State<SwipeScreen> {
       if (_swipeHintCount < 7) _swipeHintCount++;
     });
 
+    _swipesThisSession++;
+    unawaited(AnalyticsService.instance.track(
+      AnalyticsEvents.swipePerformed,
+      properties: {
+        'decision': decision.name,
+        'position_in_session': positionBeforeSwipe,
+        'mode': widget.mode.name,
+      },
+    ));
+
     PreferencesService.instance.incrementSwipeHintCount();
     PreferencesService.instance.incrementLifetimeSwipes();
 
     if (_currentIndex >= _items.length) {
+      _sessionCompleted = true;
       _onSessionComplete();
       return;
     }
@@ -293,6 +377,7 @@ class _SwipeScreenState extends State<SwipeScreen> {
   /// Called when the user taps "Review marked" mid-session.
   /// Navigates immediately without requiring all cards to be swiped.
   void _reviewNow() {
+    _sessionCompleted = true;
     final toDelete =
         _items.where((i) => i.decision == SwipeDecision.delete).toList();
     final laterItems =

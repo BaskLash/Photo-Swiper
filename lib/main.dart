@@ -1,23 +1,39 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import 'screens/intro_screen.dart';
 import 'screens/permission_screen.dart';
 import 'screens/home_screen.dart';
+import 'services/analytics_events.dart';
+import 'services/analytics_service.dart';
 import 'services/preferences_service.dart';
 import 'services/purchase_service.dart';
 import 'services/review_prompt_service.dart';
 
+/// When the current app session began. Used by [PhotoSwiperApp]'s lifecycle
+/// observer to compute `session_duration_seconds` for `app_backgrounded`.
+final DateTime _appOpenedAt = DateTime.now();
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await PreferencesService.instance.init();
+  await AnalyticsService.instance.init();
   await ReviewPromptService.instance.recordAppLaunch();
   // RevenueCat init runs in the background — UI doesn't block on it.
   // Pre-purchase state defaults to free; the listener flips us to pro the
   // moment configure() returns with an active entitlement.
   unawaited(PurchaseService.instance.init());
+
+  // Attach non-PII super properties so every event is segmentable by app
+  // version and platform. Non-blocking.
+  unawaited(_registerSuperProperties());
+
+  unawaited(AnalyticsService.instance.track(AnalyticsEvents.appOpened));
+
   // Lock to portrait
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
@@ -35,9 +51,50 @@ void main() async {
   runApp(PhotoSwiperApp(initialRoute: initialRoute));
 }
 
-class PhotoSwiperApp extends StatelessWidget {
+Future<void> _registerSuperProperties() async {
+  try {
+    final info = await PackageInfo.fromPlatform();
+    await AnalyticsService.instance.setUserProperties({
+      'app_version': info.version,
+      'platform': Platform.isIOS ? 'ios' : 'android',
+    });
+  } catch (_) {
+    // Silent — analytics setup must never crash the app.
+  }
+}
+
+class PhotoSwiperApp extends StatefulWidget {
   final String initialRoute;
   const PhotoSwiperApp({super.key, required this.initialRoute});
+
+  @override
+  State<PhotoSwiperApp> createState() => _PhotoSwiperAppState();
+}
+
+class _PhotoSwiperAppState extends State<PhotoSwiperApp>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      final seconds = DateTime.now().difference(_appOpenedAt).inSeconds;
+      unawaited(AnalyticsService.instance.track(
+        AnalyticsEvents.appBackgrounded,
+        properties: {'session_duration_seconds': seconds},
+      ));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -74,7 +131,7 @@ class PhotoSwiperApp extends StatelessWidget {
       ),
 
       // ── Routes ───────────────────────────────────────────────────────────────
-      initialRoute: initialRoute,
+      initialRoute: widget.initialRoute,
       routes: {
         '/intro': (_) => const IntroScreen(),
         '/permission': (_) => const PermissionScreen(),

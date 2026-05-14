@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:photo_manager/photo_manager.dart';
+import '../services/analytics_events.dart';
+import '../services/analytics_service.dart';
 import '../services/preferences_service.dart';
 
 class PermissionScreen extends StatefulWidget {
@@ -27,6 +30,7 @@ class _PermissionScreenState extends State<PermissionScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    unawaited(AnalyticsService.instance.screen('permission_screen'));
     // On return launches, silently check permission to skip straight to home.
     if (PreferencesService.instance.hasSeenOnboarding) {
       _silentChecking = true;
@@ -74,7 +78,13 @@ class _PermissionScreenState extends State<PermissionScreen>
     // no dialog is shown on this call.
     final ps = await PhotoManager.requestPermissionExtend();
     if (!mounted) return;
-    if (ps.isAuth || ps.hasAccess) _goHome();
+    if (ps.isAuth || ps.hasAccess) {
+      unawaited(AnalyticsService.instance.track(
+        AnalyticsEvents.photoPermissionGranted,
+        properties: const {'source': 'settings_return'},
+      ));
+      _goHome();
+    }
     // Still denied → do nothing; the user stays on the fallback screen.
     // This is what breaks the app ↔ Settings loop.
   }
@@ -92,6 +102,10 @@ class _PermissionScreenState extends State<PermissionScreen>
       _showDeniedFallback = false;
     });
 
+    unawaited(AnalyticsService.instance.track(
+      AnalyticsEvents.photoPermissionRequested,
+    ));
+
     try {
       // photo_manager is already used throughout the app and correctly maps to
       // the native iOS PHPhotoLibrary API:
@@ -107,18 +121,32 @@ class _PermissionScreenState extends State<PermissionScreen>
       if (!mounted) return;
 
       if (ps.isAuth || ps.hasAccess) {
+        unawaited(AnalyticsService.instance.track(
+          AnalyticsEvents.photoPermissionGranted,
+          properties: const {'source': 'prompt'},
+        ));
         HapticFeedback.lightImpact();
         _goHome();
       } else {
         // Denied or restricted.
         // We NEVER auto-open Settings here — that is what caused the loop.
         // Instead, switch to the fallback view which has an explicit button.
+        unawaited(AnalyticsService.instance.track(
+          AnalyticsEvents.photoPermissionDenied,
+        ));
         setState(() {
           _requesting = false;
           _showDeniedFallback = true;
         });
       }
-    } catch (_) {
+    } catch (e) {
+      unawaited(AnalyticsService.instance.track(
+        AnalyticsEvents.errorOccurred,
+        properties: {
+          'error_type': e.runtimeType.toString(),
+          'context': 'permission_request',
+        },
+      ));
       if (mounted) _goHome();
     }
   }

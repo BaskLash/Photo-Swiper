@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'dart:typed_data';
 
 import '../models/swipe_item.dart';
+import '../services/analytics_events.dart';
+import '../services/analytics_service.dart';
 import '../services/media_service.dart';
 import 'review_screen.dart';
 
@@ -45,6 +48,7 @@ class _GridSelectScreenState extends State<GridSelectScreen> {
   @override
   void initState() {
     super.initState();
+    unawaited(AnalyticsService.instance.screen('grid_select_screen'));
     _load();
   }
 
@@ -52,9 +56,22 @@ class _GridSelectScreenState extends State<GridSelectScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
+    final startedAt = DateTime.now();
+    unawaited(AnalyticsService.instance.track(
+      AnalyticsEvents.galleryLoadStarted,
+      properties: const {'mode': 'grid_select'},
+    ));
     try {
       final assets =
           await _service.loadMonthMedia(widget.month, widget.year);
+      unawaited(AnalyticsService.instance.track(
+        AnalyticsEvents.galleryLoadCompleted,
+        properties: {
+          'mode': 'grid_select',
+          'photo_count': assets.length,
+          'load_time_ms': DateTime.now().difference(startedAt).inMilliseconds,
+        },
+      ));
       if (!mounted) return;
       setState(() {
         _assets = assets;
@@ -66,7 +83,21 @@ class _GridSelectScreenState extends State<GridSelectScreen> {
           if (mounted) setState(() => _fileSizes[asset.id] = size);
         });
       }
-    } catch (_) {
+    } catch (e) {
+      unawaited(AnalyticsService.instance.track(
+        AnalyticsEvents.galleryLoadFailed,
+        properties: {
+          'mode': 'grid_select',
+          'error_type': e.runtimeType.toString(),
+        },
+      ));
+      unawaited(AnalyticsService.instance.track(
+        AnalyticsEvents.errorOccurred,
+        properties: {
+          'error_type': e.runtimeType.toString(),
+          'context': 'gallery_load_grid',
+        },
+      ));
       if (mounted) setState(() => _loading = false);
     }
   }

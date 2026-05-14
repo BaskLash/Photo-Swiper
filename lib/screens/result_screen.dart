@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../services/analytics_service.dart';
 
 class ResultScreen extends StatefulWidget {
   final int deletedCount;
@@ -32,6 +34,11 @@ class _ResultScreenState extends State<ResultScreen>
         vsync: this, duration: const Duration(milliseconds: 600));
     _scaleAnim = CurvedAnimation(parent: _ctrl, curve: Curves.elasticOut);
     _fadeAnim = CurvedAnimation(parent: _ctrl, curve: Curves.easeIn);
+
+    unawaited(AnalyticsService.instance.screen('result_screen', properties: {
+      'deleted_count': widget.deletedCount,
+      'freed_bytes': widget.freedBytes,
+    }));
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _ctrl.forward();

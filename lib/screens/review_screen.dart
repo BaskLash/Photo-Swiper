@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'dart:typed_data';
 
 import '../models/swipe_item.dart';
+import '../services/analytics_events.dart';
+import '../services/analytics_service.dart';
 import '../services/media_service.dart';
 import '../services/review_prompt_service.dart';
 import 'result_screen.dart';
@@ -28,6 +31,22 @@ class _ReviewScreenState extends State<ReviewScreen> {
 
   List<SwipeItem> get _selected =>
       widget.toDelete.where((i) => i.isSelectedForDeletion).toList();
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(AnalyticsService.instance.screen('review_screen'));
+    final estimatedBytes = widget.toDelete
+        .where((i) => i.isSelectedForDeletion)
+        .fold<int>(0, (sum, i) => sum + (i.fileSizeBytes ?? 0));
+    unawaited(AnalyticsService.instance.track(
+      AnalyticsEvents.cleanupReviewOpened,
+      properties: {
+        'items_to_delete': widget.toDelete.length,
+        'estimated_bytes_freed': estimatedBytes,
+      },
+    ));
+  }
 
   int get _totalBytes =>
       _selected.fold(0, (sum, i) => sum + (i.fileSizeBytes ?? 0));
@@ -88,7 +107,16 @@ class _ReviewScreenState extends State<ReviewScreen> {
       ),
     );
 
-    if (confirmed != true) return;
+    if (confirmed != true) {
+      unawaited(AnalyticsService.instance.track(
+        AnalyticsEvents.cleanupCanceled,
+        properties: {
+          'items_pending': _selected.length,
+          'cancel_source': 'in_app_dialog',
+        },
+      ));
+      return;
+    }
 
     setState(() => _deleting = true);
     HapticFeedback.mediumImpact();
@@ -107,6 +135,21 @@ class _ReviewScreenState extends State<ReviewScreen> {
       await ReviewPromptService.instance.recordCleanupCompleted(
         freedBytes: actualFreedBytes,
       );
+      unawaited(AnalyticsService.instance.track(
+        AnalyticsEvents.cleanupConfirmed,
+        properties: {
+          'items_deleted': deleted.length,
+          'bytes_freed': actualFreedBytes,
+        },
+      ));
+    } else {
+      unawaited(AnalyticsService.instance.track(
+        AnalyticsEvents.cleanupCanceled,
+        properties: {
+          'items_pending': countBefore,
+          'cancel_source': 'system_dialog',
+        },
+      ));
     }
 
     if (!mounted) return;

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:photo_manager/photo_manager.dart';
@@ -5,6 +6,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:in_app_review/in_app_review.dart';
+import '../services/analytics_service.dart';
 import '../services/preferences_service.dart';
 
 // Replace with real values before shipping
@@ -33,6 +35,7 @@ class _SettingsScreenState extends State<SettingsScreen>
     super.initState();
     _leftHanded = PreferencesService.instance.isLeftHanded;
     WidgetsBinding.instance.addObserver(this);
+    unawaited(AnalyticsService.instance.screen('settings_screen'));
     _loadPermissionStatus();
     _loadVersion();
   }

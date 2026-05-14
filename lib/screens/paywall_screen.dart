@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../services/analytics_events.dart';
+import '../services/analytics_service.dart';
 import '../services/purchase_service.dart';
 
 /// Premium subscription paywall. Returns `true` from [Navigator.pop] when the
@@ -29,6 +32,14 @@ class _PaywallScreenState extends State<PaywallScreen> {
   bool _purchasing = false;
   String? _errorMessage;
 
+  /// True once the paywall has produced a successful purchase or restore.
+  /// Used to decide whether dispose should fire `paywall_dismissed`.
+  bool _converted = false;
+
+  /// Timestamp of [initState] — used to compute `seconds_visible` for
+  /// `paywall_dismissed`.
+  final DateTime _shownAt = DateTime.now();
+
   static const Color _bg = Color(0xFF0D0D0D);
   static const Color _surface = Color(0xFF1C1C1E);
   static const Color _accent = Color(0xFF6B4EFF);
@@ -38,7 +49,32 @@ class _PaywallScreenState extends State<PaywallScreen> {
   @override
   void initState() {
     super.initState();
+    unawaited(AnalyticsService.instance.screen('paywall_screen'));
+    unawaited(AnalyticsService.instance.track(
+      AnalyticsEvents.paywallShown,
+      properties: const {'trigger': 'after_10_swipes'},
+    ));
     _loadOfferings();
+  }
+
+  @override
+  void dispose() {
+    if (!_converted) {
+      final seconds = DateTime.now().difference(_shownAt).inSeconds;
+      unawaited(AnalyticsService.instance.track(
+        AnalyticsEvents.paywallDismissed,
+        properties: {'seconds_visible': seconds},
+      ));
+    }
+    super.dispose();
+  }
+
+  String _tierFor(Package pkg) {
+    final type = pkg.packageType;
+    if (type == PackageType.annual) return 'yearly';
+    if (type == PackageType.monthly) return 'monthly';
+    if (type == PackageType.weekly) return 'weekly';
+    return pkg.identifier;
   }
 
   Future<void> _loadOfferings() async {
@@ -105,6 +141,15 @@ class _PaywallScreenState extends State<PaywallScreen> {
       final success = await _service.purchase(pkg);
       if (!mounted) return;
       if (success) {
+        _converted = true;
+        unawaited(AnalyticsService.instance.track(
+          AnalyticsEvents.subscriptionStarted,
+          properties: {
+            'tier': _tierFor(pkg),
+            'price': pkg.storeProduct.price,
+            'currency_code': pkg.storeProduct.currencyCode,
+          },
+        ));
         HapticFeedback.heavyImpact();
         Navigator.of(context).pop(true);
       } else {
@@ -129,6 +174,10 @@ class _PaywallScreenState extends State<PaywallScreen> {
     final ok = await _service.restore();
     if (!mounted) return;
     if (ok) {
+      _converted = true;
+      unawaited(AnalyticsService.instance.track(
+        AnalyticsEvents.subscriptionRestored,
+      ));
       Navigator.of(context).pop(true);
       return;
     }
