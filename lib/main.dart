@@ -8,10 +8,12 @@ import 'screens/permission_screen.dart';
 import 'screens/home_screen.dart';
 import 'services/preferences_service.dart';
 import 'services/purchase_service.dart';
+import 'services/review_prompt_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await PreferencesService.instance.init();
+  await ReviewPromptService.instance.recordAppLaunch();
   // RevenueCat init runs in the background — UI doesn't block on it.
   // Pre-purchase state defaults to free; the listener flips us to pro the
   // moment configure() returns with an active entitlement.

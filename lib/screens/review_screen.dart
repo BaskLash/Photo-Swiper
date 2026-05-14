@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import '../models/swipe_item.dart';
 import '../services/media_service.dart';
+import '../services/review_prompt_service.dart';
 import 'result_screen.dart';
 
 class ReviewScreen extends StatefulWidget {
@@ -97,6 +98,16 @@ class _ReviewScreenState extends State<ReviewScreen> {
 
     final deleted =
         await _service.deleteAssets(_selected.map((i) => i.asset).toList());
+
+    if (deleted.isNotEmpty) {
+      final deletedIds = deleted.toSet();
+      final actualFreedBytes = _selected
+          .where((i) => deletedIds.contains(i.asset.id))
+          .fold<int>(0, (sum, i) => sum + (i.fileSizeBytes ?? 0));
+      await ReviewPromptService.instance.recordCleanupCompleted(
+        freedBytes: actualFreedBytes,
+      );
+    }
 
     if (!mounted) return;
     setState(() => _deleting = false);
